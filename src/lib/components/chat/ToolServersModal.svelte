@@ -18,6 +18,10 @@ export let selectedToolIds: string[] = []; // Explicitly typed
 
 const i18nStore = getContext<Writable<I18nInstanceType>>('i18n'); // Explicitly type the store
 
+$: if (show) {
+  console.log('All Available Tools in Modal (when shown):', $allAvailableTools);
+}
+
 // Combine backend tools and local MCP tools into a single list
 const allAvailableTools = derived<
   [typeof tools, typeof localMcpTools], // Specify store types

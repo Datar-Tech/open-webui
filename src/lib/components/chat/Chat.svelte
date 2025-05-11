@@ -10,7 +10,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
-	import { get, type Unsubscriber, type Writable } from 'svelte/store';
+	import { get, derived, type Unsubscriber, type Writable } from 'svelte/store'; // Added derived
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -148,6 +148,35 @@
 	let chatFiles: any[] = [];
 	let files: any[] = [];
 	let params = {};
+
+
+	// Derived store for combining backend and local tools for MessageInput
+	const displayedToolServers = derived(
+		[globalToolsStore, localMcpTools],
+		([$globalTools, $localMcp]) => {
+			const backendTools: Tool[] = ($globalTools ?? []).map((tool: Tool) => ({
+				...tool,
+				isLocalClientCall: false
+			}));
+
+			const localToolsTransformed: Tool[] = [];
+			($localMcp ?? []).forEach((serverConfig: LocalClientToolServerConfig) => {
+				if (serverConfig.enabled && serverConfig.discoveredCapabilities) {
+					serverConfig.discoveredCapabilities.forEach((cap: McpCapability) => {
+						localToolsTransformed.push({
+							id: `${serverConfig.mcpEndpointUrl}#${cap.id}`, // Unique ID
+							name: cap.name || cap.id,
+							meta: { description: cap.description },
+							isLocalClientCall: true,
+							localMcpServerUrl: serverConfig.mcpEndpointUrl,
+							capabilities: [cap]
+						});
+					});
+				}
+			});
+			return [...backendTools, ...localToolsTransformed];
+		}
+	);
 
 	$: if (chatIdProp) {
 		(async () => {
@@ -2147,7 +2176,7 @@
 								bind:codeInterpreterEnabled
 								bind:webSearchEnabled
 								bind:atSelectedModel
-								toolServers={$toolServers}
+								toolServers={$displayedToolServers}
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
 								{stopResponse}
 								{createMessagePair}
@@ -2204,7 +2233,7 @@
 								bind:webSearchEnabled
 								bind:atSelectedModel
 								transparentBackground={$settings?.backgroundImageUrl ?? false}
-								toolServers={$toolServers}
+								toolServers={$displayedToolServers}
 								{stopResponse}
 								{createMessagePair}
 								on:upload={async (e) => {
