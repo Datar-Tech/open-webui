@@ -7,8 +7,8 @@ import type {
 } from '$lib/types/tools';
 
 const MCP_DEFAULT_PATH = '/sse';
-const DISCOVERY_TIMEOUT_MS = 10000; // 10 seconds scan timeout
-const MCP_SSE_INIT_TIMEOUT_MS = 5000; // 5 seconds for SSE handshake to complete
+const DISCOVERY_TIMEOUT_MS = 60000; // 60 seconds scan timeout
+const MCP_SSE_INIT_TIMEOUT_MS = 60000; // 60 seconds for SSE handshake to complete
 
 /**
  * Initializes with a local MCP server using SSE and retrieves its capabilities,

@@ -104,8 +104,8 @@
 	let loading = true;
 
 	const eventTarget = new EventTarget();
-	let controlPane;
-	let controlPaneComponent;
+	let controlPane: Pane | undefined;
+	let controlPaneComponent: ChatControls | undefined;
 
 	let autoScroll = true;
 	let processing = '';
@@ -119,7 +119,7 @@
 	let eventConfirmationInput = false;
 	let eventConfirmationInputPlaceholder = '';
 	let eventConfirmationInputValue = '';
-	let eventCallback = null;
+	let eventCallback: ((value: any) => void) | null = null;
 
 	let chatIdUnsubscriber: Unsubscriber | undefined;
 
@@ -128,7 +128,7 @@
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
 
-	let selectedToolIds = [];
+	let selectedToolIds: string[] = [];
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
@@ -141,12 +141,12 @@
 		currentId: null
 	};
 
-	let taskIds = null;
+	let taskIds: string[] | null = null;
 
 	// Chat Input
 	let prompt = '';
-	let chatFiles = [];
-	let files = [];
+	let chatFiles: any[] = [];
+	let files: any[] = [];
 	let params = {};
 
 	$: if (chatIdProp) {
@@ -207,8 +207,8 @@
 	}
 
 	const setToolIds = async () => {
-		if (!$tools) {
-			tools.set(await getTools(localStorage.token));
+		if (!$globalToolsStore) {
+			globalToolsStore.set(await getTools(localStorage.token));
 		}
 
 		if (selectedModels.length !== 1 && !atSelectedModel) {
@@ -218,7 +218,7 @@
 		const model = atSelectedModel ?? $models.find((m) => m.id === selectedModels[0]);
 		if (model) {
 			selectedToolIds = (model?.info?.meta?.toolIds ?? []).filter((id) =>
-				$tools.find((t) => t.id === id)
+				$globalToolsStore.find((t) => t.id === id)
 			);
 		}
 	};
@@ -870,23 +870,38 @@
 		}
 	};
 
+	const uploadYoutubeTranscription = async (url) => {
+		const fileItem = {
+			id: uuidv4(),
+			name: url,
+			type: 'youtube_video',
+			status: 'uploading',
+			progress: 0,
+			file: {}
+		};
+
 		try {
 			files = [...files, fileItem];
 			const res = await processYoutubeVideo(localStorage.token, url);
 
 			if (res) {
-				fileItem.status = 'uploaded';
-				fileItem.collection_name = res.collection_name;
-				fileItem.file = {
-					...res.file,
-					...fileItem.file
+				const updatedFileItem = {
+					...fileItem,
+					status: 'uploaded',
+					collection_name: res.collection_name,
+					file: {
+						...fileItem.file,
+						...res.file
+					}
 				};
-				files = files;
+				files = files.map(f => (f.id === updatedFileItem.id ? updatedFileItem : f));
+			} else {
+				files = files.filter((f) => f.id !== fileItem.id);
+				toast.error(`Failed to process YouTube video: ${url}`);
 			}
 		} catch (e) {
-			// Remove the failed doc from the files array
-			files = files.filter((f) => f.name !== url);
-			toast.error(`${e}`);
+			files = files.filter((f) => f.id !== fileItem.id);
+			toast.error(`Error processing YouTube video: ${e.message || String(e)}`);
 		}
 	};
 
@@ -1341,377 +1356,6 @@
 		}
 	};
 
-	// Helper function to find a tool by its ID from combined sources
-	// This was added in a previous session and should be present.
-	// Ensure it uses the correct store names if they were changed (e.g., globalToolsStore).
-	function findToolById(toolId: string, backendTools: Tool[] | null, localServerConfigs: LocalClientToolServerConfig[] | null): Tool | undefined {
-		let foundTool: Tool | undefined;
-
-		// Check backend tools
-		if (backendTools) {
-				foundTool = backendTools.find(t => t.id === toolId);
-				// Ensure isLocalClientCall is explicitly false for backend tools if not already set
-				if (foundTool) return { ...foundTool, isLocalClientCall: foundTool.isLocalClientCall ?? false };
-		}
-
-		// Check local tools
-		if (localServerConfigs) {
-				for (const serverConfig of localServerConfigs) {
-						if (serverConfig.enabled && serverConfig.discoveredCapabilities) {
-								for (const cap of serverConfig.discoveredCapabilities) {
-										const localToolId = `${serverConfig.mcpEndpointUrl}#${cap.id}`;
-										if (localToolId === toolId) {
-												return {
-														id: localToolId,
-														name: cap.name || cap.id,
-														meta: { description: cap.description },
-														isLocalClientCall: true,
-														localMcpServerUrl: serverConfig.mcpEndpointUrl, // This is the mcpEndpointUrl from the config
-														capabilities: [cap] // Store the specific capability
-												};
-										}
-								}
-						}
-				}
-		}
-		return undefined;
-	}
-	
-	async function sendToolResult(chatIdForTool: string, toolCallId: string, toolName: string, result: string, originalAssistantMessageId: string) {
-		const toolResponseMessage = {
-				role: 'tool',
-				tool_call_id: toolCallId,
-				name: toolName,
-				content: result,
-		};
-
-		const originalAssistantMessage = history.messages[originalAssistantMessageId];
-		if (!originalAssistantMessage) {
-				console.error("Original assistant message not found for sending tool result.");
-				toast.error("Failed to send tool result: context lost.");
-				return;
-		}
-		const modelIdToUse = originalAssistantMessage.model;
-		const currentModels = get(models);
-		const model = currentModels.find(m => m.id === modelIdToUse);
-
-		if (!model) {
-				console.error(`Cannot send tool result: Model ${modelIdToUse} not found.`);
-				toast.error(`Failed to send tool result: Model ${modelIdToUse} not found.`);
-				return;
-		}
-		
-		const displayToolMessageId = uuidv4();
-		const displayToolMessage: any = {
-				id: displayToolMessageId,
-				parentId: originalAssistantMessageId,
-				childrenIds: [], 
-				role: 'tool', 
-				content: `Tool ${toolName} output: ${result.length > 300 ? result.substring(0, 297) + '...' : result}`,
-				tool_call_id: toolCallId,
-				name: toolName,
-				timestamp: Math.floor(Date.now() / 1000),
-				done: true,
-		};
-		history.messages[displayToolMessageId] = displayToolMessage;
-		if (!history.messages[originalAssistantMessageId].childrenIds.includes(displayToolMessageId)) {
-				 history.messages[originalAssistantMessageId].childrenIds.push(displayToolMessageId);
-		}
-		history.messages[originalAssistantMessageId] = { ...history.messages[originalAssistantMessageId] };
-
-		let messagesUpToAssistantCall = createMessagesList(history, originalAssistantMessageId);
-		
-		if (messagesUpToAssistantCall.length === 0 || messagesUpToAssistantCall[messagesUpToAssistantCall.length -1].id !== originalAssistantMessageId) {
-				messagesUpToAssistantCall.push(originalAssistantMessage);
-		}
-		
-		const messagesForLLM = [
-				...messagesUpToAssistantCall.map(msg => ({ 
-						role: msg.role,
-						content: msg.content,
-						...(msg.tool_calls ? { tool_calls: msg.tool_calls } : {}), 
-				})),
-				toolResponseMessage 
-		].filter(m => m.role && (typeof m.content === 'string' || m.tool_calls));
-
-		const newLLMResponseId = uuidv4();
-		const newLLMResponseMessage: any = { 
-				id: newLLMResponseId,
-				parentId: displayToolMessageId, 
-				childrenIds: [],
-				role: 'assistant',
-				content: '', 
-				model: model.id,
-				modelName: model.name ?? model.id,
-				timestamp: Math.floor(Date.now() / 1000),
-				done: false,
-		};
-		history.messages[newLLMResponseId] = newLLMResponseMessage;
-		history.messages[displayToolMessageId].childrenIds.push(newLLMResponseId);
-		history.messages[displayToolMessageId] = { ...history.messages[displayToolMessageId] };
-
-		history.currentId = newLLMResponseId;
-		history = { ...history };
-		await tick();
-		if (autoScroll) scrollToBottom();
-
-		try {
-				const currentSettings = get(settings);
-				const currentSocket = get(socket);
-				const res = await generateOpenAIChatCompletion(
-						localStorage.token,
-						{
-								stream: true,
-								model: model.id,
-								messages: messagesForLLM,
-								params: { ...currentSettings?.params, ...params },
-								features: { /* ... web_search etc. ... */ },
-								variables: { /* ... */ },
-								model_item: model,
-								session_id: currentSocket?.id,
-								chat_id: chatIdForTool,
-								id: newLLMResponseId, 
-								...( (model.info?.meta?.capabilities?.usage ?? false) ? { stream_options: { include_usage: true } } : {})
-						},
-						`${WEBUI_BASE_URL}/api`
-				);
-
-				if (res && res.error) {
-						await handleOpenAIError(res.error, history.messages[newLLMResponseId]);
-				} else if (res && res.task_id) {
-						if (taskIds) taskIds.push(res.task_id); else taskIds = [res.task_id];
-				}
-		} catch (e: any) { 
-				console.error("Error sending tool result to LLM:", e);
-				toast.error(`Error sending tool result: ${e.message}`);
-				history.messages[newLLMResponseId].content = `Error: Could not get LLM response after tool execution. ${e.message}`;
-				history.messages[newLLMResponseId].done = true;
-				history = { ...history };
-		}
-	}
-
-	const chatCompletionEventHandler = async (data: any, message: any, chatIdValue: string, currentGlobalTools: Tool[] | null, currentLocalMcpTools: LocalClientToolServerConfig[] | null) => {
-		const { id, done, choices, content, sources, selected_model_id, error, usage } = data;
-	
-		if (error) {
-			await handleOpenAIError(error, message);
-		}
-	
-		if (sources) {
-			message.sources = sources;
-		}
-	
-		let llmToolCalls = null;
-		if (data.tool_calls) {
-				llmToolCalls = data.tool_calls;
-		} else if (choices && choices[0]?.message?.tool_calls) {
-				llmToolCalls = choices[0].message.tool_calls;
-		} else if (choices && choices[0]?.delta?.tool_calls) {
-				llmToolCalls = choices[0].delta.tool_calls;
-		}
-	
-		if (llmToolCalls && Array.isArray(llmToolCalls) && llmToolCalls.length > 0) {
-			processing = 'tool_calls'; 
-			message.done = false; 
-	
-			if (!message.tool_calls) message.tool_calls = [];
-			message.tool_calls.push(...llmToolCalls.filter(tc => tc.function && tc.function.name));
-	
-			for (const toolCallRequest of llmToolCalls) {
-				if (!toolCallRequest.function || !toolCallRequest.function.name) continue;
-	
-				const toolName = toolCallRequest.function.name;
-				const toolArgsString = toolCallRequest.function.arguments; 
-				const toolCallId = toolCallRequest.id;
-	
-				const toolToExecute = findToolById(toolName, currentGlobalTools, currentLocalMcpTools);
-	
-				if (toolToExecute && toolToExecute.isLocalClientCall && toolToExecute.localMcpServerUrl && toolToExecute.capabilities && toolToExecute.capabilities.length > 0) {
-					const capability = toolToExecute.capabilities[0] as McpCapability;
-					const invocationDetails = capability.invocation as McpHttpInvocation;
-					
-					const serverConfigId = toolToExecute.localMcpServerUrl; // This is the mcpEndpointUrl / ID of the server config
-					const serverConfig = currentLocalMcpTools?.find(sc => sc.id === serverConfigId);
-
-					if (!serverConfig || !serverConfig.messagePath) {
-						console.error(`Configuration or messagePath missing for local MCP server: ${serverConfigId}`);
-						await sendToolResult(chatIdValue, toolCallId, toolName, `Error: Configuration or messagePath missing for local tool server.`, message.id);
-						continue;
-					}
-					
-					let mcpBaseUrl = '';
-					try {
-							mcpBaseUrl = new URL(toolToExecute.localMcpServerUrl).origin;
-					} catch (e: any) { 
-							console.error(`Invalid localMcpServerUrl for tool ${toolName}: ${toolToExecute.localMcpServerUrl}`, e);
-							await sendToolResult(chatIdValue, toolCallId, toolName, `Error: Invalid server URL configuration for tool ${toolName}.`, message.id);
-							continue;
-					}
-	
-					let parsedArgs = {};
-					try {
-						parsedArgs = JSON.parse(toolArgsString);
-					} catch (e: any) { 
-						console.error(`Failed to parse arguments for ${toolName}: ${toolArgsString}`, e);
-						await sendToolResult(chatIdValue, toolCallId, toolName, `Error: Malformed arguments for tool ${toolName}. Arguments must be a valid JSON string.`, message.id);
-						continue;
-					}
-					
-					const toolCallFeedback = `\nCalling local tool: ${toolToExecute.name}...\n`;
-					if (!message.content.includes(toolCallFeedback)) message.content += toolCallFeedback;
-					history.messages[message.id] = { ...message };
-					await tick();
-					if (autoScroll) scrollToBottom();
-	
-					try {
-						// Pass the messagePath to executeLocalClientTool
-						const result = await executeLocalClientTool(parsedArgs, invocationDetails, mcpBaseUrl, serverConfig.messagePath);
-						await sendToolResult(chatIdValue, toolCallId, toolName, JSON.stringify(result), message.id);
-						const toolSuccessFeedback = `Local tool ${toolToExecute.name} executed.\n`;
-						if (!message.content.includes(toolSuccessFeedback)) message.content += toolSuccessFeedback;
-					} catch (e: any) { 
-						console.error(`Error executing local tool ${toolName}:`, e);
-						toast.error(`Local tool ${toolName} error: ${e.message}`);
-						const toolErrorFeedback = `Error executing local tool ${toolName}: ${e.message}\n`;
-						if (!message.content.includes(toolErrorFeedback)) message.content += toolErrorFeedback;
-						await sendToolResult(chatIdValue, toolCallId, toolName, `Error: ${e.message}`, message.id);
-					}
-					history.messages[message.id] = { ...message };
-					await tick();
-					if (autoScroll) scrollToBottom();
-	
-				} else if (toolToExecute) {
-					const backendToolFeedback = `\nBackend tool ${toolToExecute.name} called by LLM.\n`;
-					if (!message.content.includes(backendToolFeedback)) message.content += backendToolFeedback;
-					history.messages[message.id] = { ...message };
-					await tick();
-					if (autoScroll) scrollToBottom();
-					console.log(`Backend tool ${toolName} requested. Assumed to be handled by backend if not local.`);
-				} else {
-					console.error(`Tool ${toolName} not found.`);
-					toast.error(`Tool ${toolName} not found.`);
-					const notFoundFeedback = `\nError: Tool ${toolName} not found.\n`;
-					if (!message.content.includes(notFoundFeedback)) message.content += notFoundFeedback;
-					await sendToolResult(chatIdValue, toolCallId, toolName, `Error: Tool ${toolName} not found.`, message.id);
-					history.messages[message.id] = { ...message };
-					await tick();
-					if (autoScroll) scrollToBottom();
-				}
-			}
-			message.done = false; 
-			history.messages[message.id] = { ...message }; 
-			return; 
-		}
-	
-		const currentSettings = get(settings);
-		const currentConfig = get(config);
-	
-		if (choices && choices[0]?.delta?.content) { 
-			let value = choices[0].delta.content;
-			if (!(message.content === '' && value === '\n')) {
-				message.content += value;
-				if (navigator.vibrate && (currentSettings?.hapticFeedback ?? false)) navigator.vibrate(5);
-				
-				const messageContentParts = getMessageContentParts(message.content, currentConfig?.audio?.tts?.split_on ?? 'punctuation');
-				messageContentParts.pop();
-				if (messageContentParts.length > 0 && messageContentParts[messageContentParts.length - 1] !== message.lastSentence) {
-					message.lastSentence = messageContentParts[messageContentParts.length - 1];
-					eventTarget.dispatchEvent(new CustomEvent('chat', { detail: { id: message.id, content: message.lastSentence } }));
-				}
-			}
-		} else if (choices && choices[0]?.message?.content) { 
-			message.content += choices[0].message.content;
-		}
-	
-		if (content) {
-			message.content = content; 
-	
-			if (navigator.vibrate && (currentSettings?.hapticFeedback ?? false)) {
-					navigator.vibrate(5);
-				}
-	
-			const messageContentParts = getMessageContentParts(
-				message.content,
-				currentConfig?.audio?.tts?.split_on ?? 'punctuation'
-			);
-			messageContentParts.pop();
-	
-			if (
-				messageContentParts.length > 0 &&
-				messageContentParts[messageContentParts.length - 1] !== message.lastSentence
-			) {
-				message.lastSentence = messageContentParts[messageContentParts.length - 1];
-				eventTarget.dispatchEvent(
-					new CustomEvent('chat', {
-						detail: {
-							id: message.id,
-							content: messageContentParts[messageContentParts.length - 1]
-						}
-					})
-				);
-			}
-		}
-	
-		if (selected_model_id) {
-			message.selectedModelId = selected_model_id;
-			message.arena = true;
-		}
-	
-		if (usage) {
-			message.usage = usage;
-		}
-	
-		history.messages[message.id] = message;
-	
-		if (done) {
-			message.done = true;
-	
-			if (currentSettings.responseAutoCopy) {
-				copyToClipboard(message.content);
-			}
-	
-			if (currentSettings.responseAutoPlayback && !get(showCallOverlay)) {
-				await tick();
-				document.getElementById(`speak-button-${message.id}`)?.click();
-			}
-	
-			let lastMessageContentPart =
-				getMessageContentParts(message.content, currentConfig?.audio?.tts?.split_on ?? 'punctuation')?.at(
-					-1
-				) ?? '';
-			if (lastMessageContentPart) {
-				eventTarget.dispatchEvent(
-					new CustomEvent('chat', {
-						detail: { id: message.id, content: lastMessageContentPart }
-					})
-				);
-			}
-			eventTarget.dispatchEvent(
-				new CustomEvent('chat:finish', {
-					detail: {
-						id: message.id,
-						content: message.content
-					}
-				})
-			);
-	
-			history.messages[message.id] = message;
-			await chatCompletedHandler(
-				chatIdValue,
-				message.model,
-				message.id,
-				createMessagesList(history, message.id)
-			);
-		}
-	
-		console.log(data);
-		if (autoScroll) {
-			scrollToBottom();
-		}
-	};
-
-	//////////////////////////
-	// Chat functions
 	//////////////////////////
 
 	const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
