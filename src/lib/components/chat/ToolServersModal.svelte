@@ -57,6 +57,7 @@ function toggleToolSelection(toolId: string) {
   } else {
     selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
   }
+  console.log('[Debug ToolServersModal] toggleToolSelection - selectedToolIds now:', JSON.parse(JSON.stringify(selectedToolIds)));
   // Consider dispatching an event if parent needs to know about selection change immediately
   // dispatch('selectionChange', { selectedToolIds });
 }

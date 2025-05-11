@@ -93,6 +93,12 @@
 		codeInterpreterEnabled
 	});
 
+	$: {
+		if (selectedToolIds) { // Check if selectedToolIds is defined
+			console.log('[Debug MessageInput] selectedToolIds changed:', JSON.parse(JSON.stringify(selectedToolIds)));
+		}
+	}
+
 	let showTools = false;
 
 	let loaded = false;
@@ -356,7 +362,7 @@
 
 <FilesOverlay show={dragged} />
 
-<ToolServersModal bind:show={showTools} {selectedToolIds} />
+<ToolServersModal bind:show={showTools} bind:selectedToolIds />
 
 {#if loaded}
 	<div class="w-full font-primary">

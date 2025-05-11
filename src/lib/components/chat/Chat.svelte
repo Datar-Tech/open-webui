@@ -13,6 +13,7 @@
 	import { get, derived, type Unsubscriber, type Writable } from 'svelte/store'; // Added derived
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL } from '$lib/constants';
+	import type { ToolServer as ToolServerType, LocalClientToolServerConfig as LocalClientToolServerConfigType, McpCapability as McpCapabilityType } from '$lib/types'; // Added ToolServerType
 
 	import {
 		chatId,
@@ -142,6 +143,75 @@
 	};
 
 	let taskIds: string[] | null = null;
+
+
+	// Reactive statement to update $toolServers when selectedToolIds or localMcpTools change
+	$: {
+		console.log('[Debug] Reactive block for toolServers update triggered.');
+		if (typeof window !== 'undefined' && $localMcpTools && selectedToolIds) {
+			console.log('[Debug] selectedToolIds:', JSON.parse(JSON.stringify(selectedToolIds)));
+			console.log('[Debug] $localMcpTools:', JSON.parse(JSON.stringify($localMcpTools)));
+
+			const activeLocalServers: ToolServerType[] = [];
+			const processedServerUrls = new Set<string>();
+
+			const getMcpEndpointUrlFromToolId = (toolId: string): string | null => {
+				let potentialUrl: string | null = null;
+				try {
+					const hashIndex = toolId.lastIndexOf('#');
+					if (hashIndex > 0) {
+						potentialUrl = toolId.substring(0, hashIndex);
+						// Basic check if it looks like a URL, proper validation might be more robust
+						if (potentialUrl.startsWith('http://') || potentialUrl.startsWith('https://')) {
+							new URL(potentialUrl); // Validate if it's a real URL
+							// console.log(`[Debug] Parsing toolId: ${toolId}, extracted URL: ${potentialUrl}`);
+							return potentialUrl;
+						}
+						potentialUrl = null; // Not a valid scheme
+					}
+				} catch (e) {
+					// console.warn(`Could not parse MCP Endpoint URL from toolId: ${toolId}`, e);
+					potentialUrl = null;
+				}
+				return potentialUrl;
+			};
+
+			for (const toolId of selectedToolIds) {
+				const mcpEndpointUrl = getMcpEndpointUrlFromToolId(toolId);
+				console.log(`[Debug] For toolId "${toolId}", parsed mcpEndpointUrl: "${mcpEndpointUrl}"`);
+
+				if (mcpEndpointUrl && !processedServerUrls.has(mcpEndpointUrl)) {
+					const localConfig = $localMcpTools.find(lc => lc.mcpEndpointUrl === mcpEndpointUrl);
+					console.log(`[Debug] Found localConfig for ${mcpEndpointUrl}:`, localConfig ? JSON.parse(JSON.stringify(localConfig)) : 'Not found');
+
+					if (localConfig && localConfig.enabled) {
+						activeLocalServers.push({
+							id: localConfig.id,
+							url: localConfig.mcpEndpointUrl,
+							openapi: {
+								info: {
+									title: localConfig.serverInfo?.name ?? localConfig.name,
+									version: localConfig.serverInfo?.version,
+									description: localConfig.serverInfo?.description
+								}
+							},
+							specs: (localConfig.discoveredCapabilities ?? []).map(cap => ({
+								name: cap.name,
+								description: cap.description
+							})),
+							isLocalMcpServer: true
+						});
+						processedServerUrls.add(mcpEndpointUrl);
+					}
+				}
+			}
+			console.log('[Debug] activeLocalServers to be set:', JSON.parse(JSON.stringify(activeLocalServers)));
+			toolServers.set(activeLocalServers);
+			console.log('[Debug] $toolServers store updated to:', JSON.parse(JSON.stringify(get(toolServers))));
+		} else {
+			// console.log('[Debug] Reactive block conditions not met (window undefined, or stores not ready).');
+		}
+	}
 
 	// Chat Input
 	let prompt = '';
