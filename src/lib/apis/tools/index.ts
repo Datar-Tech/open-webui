@@ -1,4 +1,5 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+export { executeTool } from './execute';
 
 export const createNewTool = async (token: string, tool: object) => {
 	let error = null;

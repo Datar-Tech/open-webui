@@ -11,18 +11,19 @@
 	import { fade } from 'svelte/transition';
 
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
-	import { getFunctions } from '$lib/apis/functions';
-	import { getModels, getToolServersData, getVersionUpdates } from '$lib/apis';
-	import { getAllTags } from '$lib/apis/chats';
-	import { getPrompts } from '$lib/apis/prompts';
-	import { getTools } from '$lib/apis/tools';
-	import { getBanners } from '$lib/apis/configs';
-	import { getUserSettings } from '$lib/apis/users';
+import { getFunctions } from '$lib/apis/functions';
+import { getModels, getToolServersData, getVersionUpdates } from '$lib/apis';
+import { getAllTags } from '$lib/apis/chats';
+import { getPrompts } from '$lib/apis/prompts';
+import { getTools } from '$lib/apis/tools';
+import { getBanners } from '$lib/apis/configs';
+import { getUserSettings } from '$lib/apis/users';
+import { initializeAndGetCapabilities } from '$lib/utils/localClientToolExecutor';
+import type { LocalClientToolServerConfig } from '$lib/types'; // Added import
+import { WEBUI_VERSION, DEFAULT_LOCAL_MCP_SSE_ENDPOINT } from '$lib/constants'; // Added DEFAULT_LOCAL_MCP_SSE_ENDPOINT
+import { compareVersion } from '$lib/utils';
 
-	import { WEBUI_VERSION } from '$lib/constants';
-	import { compareVersion } from '$lib/utils';
-
-	import {
+import {
 		config,
 		user,
 		settings,
@@ -34,12 +35,13 @@
 		tags,
 		banners,
 		showSettings,
-		showChangelog,
-		temporaryChatEnabled,
-		toolServers
-	} from '$lib/stores';
+showChangelog,
+temporaryChatEnabled,
+toolServers,
+localMcpTools // Added for local MCP
+} from '$lib/stores';
 
-	import Sidebar from '$lib/components/layout/Sidebar.svelte';
+import Sidebar from '$lib/components/layout/Sidebar.svelte';
 	import SettingsModal from '$lib/components/chat/SettingsModal.svelte';
 	import ChangelogModal from '$lib/components/ChangelogModal.svelte';
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
@@ -50,12 +52,72 @@
 	const i18n = getContext('i18n');
 
 	let loaded = false;
-	let DB = null;
-	let localDBChats = [];
+let DB = null;
+let localDBChats = [];
 
-	let version;
+let version;
 
-	onMount(async () => {
+// const DEFAULT_LOCAL_MCP_ENDPOINT = 'http://localhost:8000/sse'; // This should be removed
+
+// Function to discover and update local MCP tools
+const discoverDefaultLocalMcpServer = async () => {
+  try {
+    // Use the imported DEFAULT_LOCAL_MCP_SSE_ENDPOINT
+    // And expect McpSseInitializeResult from the new initializeAndGetCapabilities
+    const result = await initializeAndGetCapabilities(DEFAULT_LOCAL_MCP_SSE_ENDPOINT); 
+    
+    if (result.error) {
+      console.warn(
+        `Failed to initialize default local MCP server via SSE at ${DEFAULT_LOCAL_MCP_SSE_ENDPOINT}: ${result.error}`
+      );
+      // toast.error($i18n.t('Could not connect to local tools at localhost:8000 via SSE.')); // Optional
+      return;
+    }
+
+    console.log(`Successfully initialized local MCP server via SSE at ${DEFAULT_LOCAL_MCP_SSE_ENDPOINT}`, result);
+
+    // Update localMcpTools store
+    localMcpTools.update((currentTools) => {
+      const existingToolIndex = currentTools.findIndex(
+        (tool) => tool.mcpEndpointUrl === DEFAULT_LOCAL_MCP_SSE_ENDPOINT // Use imported constant
+      );
+
+      const newToolConfig: LocalClientToolServerConfig = { // Use imported type
+        id: DEFAULT_LOCAL_MCP_SSE_ENDPOINT, // Use URL as ID
+        mcpEndpointUrl: DEFAULT_LOCAL_MCP_SSE_ENDPOINT,
+        name: result.serverInfo?.name || `Local MCP Server (${new URL(DEFAULT_LOCAL_MCP_SSE_ENDPOINT).host})`,
+        enabled: true, 
+        discoveredCapabilities: result.capabilities, // Use capabilities from result
+        serverInfo: result.serverInfo,
+        messagePath: result.messagePath // Store the messagePath
+      };
+
+      if (existingToolIndex !== -1) {
+        // Preserve user's 'enabled' preference if server is re-discovered
+        const userEnabledPreference = currentTools[existingToolIndex].enabled;
+        currentTools[existingToolIndex] = { ...newToolConfig, enabled: userEnabledPreference };
+        return [...currentTools];
+      } else {
+        return [...currentTools, newToolConfig];
+      }
+    });
+    toast.success($i18n.t('Local SSE tools updated from localhost:8000'));
+  } catch (error) {
+    // This catch block now handles errors from the new initializeAndGetCapabilities promise
+    console.warn(`Failed to connect/initialize default local MCP server via SSE at ${DEFAULT_LOCAL_MCP_SSE_ENDPOINT}:`, (error as Error).message ? (error as Error).message : error);
+    // Optionally, notify user or clear existing config for this default server if it's unreachable
+    // For now, just log a warning. If it was previously discovered, it will remain in localStorage.
+    // The PRD says "若本地 MCP 伺服器的能力 (capabilities) 發生變更，使用者可以透過重新整理 Open WebUI 網頁來觸發前端重新進行探索"
+    // This implies that if discovery fails, the old (potentially stale) data might persist until next successful discovery.
+    // Or, we could remove/disable it:
+    // localMcpTools.update((currentTools) => {
+    //   return currentTools.filter(tool => tool.mcpEndpointUrl !== DEFAULT_LOCAL_MCP_ENDPOINT);
+    // });
+    // toast.error($i18n.t('Could not connect to local tools at localhost:8000'));
+  }
+};
+
+onMount(async () => {
 		if ($user === undefined || $user === null) {
 			await goto('/auth');
 		} else if (['user', 'admin'].includes($user?.role)) {
@@ -217,16 +279,20 @@
 						checkForVersionUpdates();
 					}
 				} else {
-					checkForVersionUpdates();
-				}
-			}
-			await tick();
-		}
+checkForVersionUpdates();
+}
+}
 
-		loaded = true;
-	});
+// Discover local MCP server
+await discoverDefaultLocalMcpServer();
 
-	const checkForVersionUpdates = async () => {
+await tick();
+}
+
+loaded = true;
+});
+
+const checkForVersionUpdates = async () => {
 		version = await getVersionUpdates(localStorage.token).catch((error) => {
 			return {
 				current: WEBUI_VERSION,

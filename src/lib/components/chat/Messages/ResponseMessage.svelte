@@ -38,6 +38,7 @@
 	import RateComment from './RateComment.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import WebSearchResults from './ResponseMessage/WebSearchResults.svelte';
+	import ToolCalls from './ResponseMessage/ToolCalls.svelte';
 	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -854,6 +855,15 @@
 
 								{#if message.code_executions}
 									<CodeExecutions codeExecutions={message.code_executions} />
+								{/if}
+
+								{#if message.tool_calls && message.tool_calls.length > 0}
+									<ToolCalls 
+										{chatId}
+										messageId={message.id}
+										modelId={message.model_id}
+										toolCalls={message.tool_calls}
+									/>
 								{/if}
 							</div>
 						{/if}

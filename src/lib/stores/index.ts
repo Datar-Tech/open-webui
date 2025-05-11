@@ -1,7 +1,8 @@
+import { browser } from '$app/environment';
 import { APP_NAME } from '$lib/constants';
 import { type Writable, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
-import type { Banner } from '$lib/types';
+import type { Banner, Tool, ToolServer, LocalClientToolServerConfig, McpCapability } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
@@ -28,17 +29,16 @@ export const USAGE_POOL: Writable<null | string[]> = writable(null);
 export const theme = writable('system');
 
 export const shortCodesToEmojis = writable(
-	Object.entries(emojiShortCodes).reduce((acc, [key, value]) => {
-		if (typeof value === 'string') {
-			acc[value] = key;
-		} else {
-			for (const v of value) {
-				acc[v] = key;
-			}
-		}
-
-		return acc;
-	}, {})
+  Object.entries(emojiShortCodes).reduce((acc: { [key: string]: string }, [key, value]) => {
+    if (typeof value === 'string') {
+      acc[value] = key;
+    } else {
+      for (const v of value) {
+        acc[v] = key;
+      }
+    }
+    return acc;
+  }, {})
 );
 
 export const TTSWorker = writable(null);
@@ -47,7 +47,7 @@ export const chatId = writable('');
 export const chatTitle = writable('');
 
 export const channels = writable([]);
-export const chats = writable(null);
+export const chats: Writable<any[] | null> = writable(null); // Corrected type to allow array or null
 export const pinnedChats = writable([]);
 export const tags = writable([]);
 
@@ -55,14 +55,74 @@ export const models: Writable<Model[]> = writable([]);
 
 export const prompts: Writable<null | Prompt[]> = writable(null);
 export const knowledge: Writable<null | Document[]> = writable(null);
-export const tools = writable(null);
-export const functions = writable(null);
+export const tools: Writable<Tool[] | null> = writable(null); // Corrected type
+export const functions = writable(null); // Assuming this is for OpenAI functions, not MCP tools
 
-export const toolServers = writable([]);
+export const toolServers: Writable<ToolServer[]> = writable([]); // Corrected type
+
+// Store for locally discovered MCP tools, persisted in localStorage
+const LOCAL_TOOLS_STORAGE_KEY = 'open-webui_local-mcp-tools';
+
+const initialLocalTools: LocalClientToolServerConfig[] = (() => {
+  if (browser) {
+    const stored = localStorage.getItem(LOCAL_TOOLS_STORAGE_KEY);
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch (e) {
+        console.error('Error parsing local MCP tools from localStorage:', e);
+        return [];
+      }
+    }
+  }
+  return [];
+})();
+
+export const localMcpTools: Writable<LocalClientToolServerConfig[]> = writable(initialLocalTools);
+
+if (browser) {
+  localMcpTools.subscribe((value) => {
+    localStorage.setItem(LOCAL_TOOLS_STORAGE_KEY, JSON.stringify(value));
+  });
+}
+
+
+// This store will combine backend-configured tools and locally discovered tools
+// For now, it's a simple combination. Logic might need to be more sophisticated
+// depending on how tools are enabled/disabled and displayed.
+export const availableTools = writable<Tool[]>([]);
+
+// Function to update availableTools based on $tools and $localMcpTools
+// This is a placeholder for more complex merging logic if needed.
+// For now, components might directly use $tools and $localMcpTools.
+// TODO: Define how localMcpTools (which are LocalClientToolServerConfig) translate to Tool items
+// For example, each capability in LocalClientToolServerConfig might become a Tool.
 
 export const banners: Writable<Banner[]> = writable([]);
 
-export const settings: Writable<Settings> = writable({});
+// Provide default for required fields in Settings
+const defaultSettings: Settings = {
+	chatDirection: 'auto',
+	// Initialize other potentially accessed optional fields to avoid undefined errors if not set by user/backend
+	models: [],
+	conversationMode: true,
+	speechAutoSend: false,
+	responseAutoPlayback: false,
+	showUsername: true,
+	notificationEnabled: true,
+	splitLargeDeltas: true,
+	ctrlEnterToSend: false,
+	scrollOnBranchChange: true,
+	hapticFeedback: false,
+	responseAutoCopy: false,
+	richTextInput: true,
+	memory: false,
+	autoTags: true,
+	backgroundImageUrl: '',
+	landingPageMode: 'chat',
+	// params and system are often model-specific or overridden, so not setting defaults here.
+};
+export const settings: Writable<Settings> = writable(defaultSettings);
 
 export const showSidebar = writable(false);
 export const showSettings = writable(false);
@@ -131,6 +191,12 @@ type OllamaModelDetails = {
 	quantization_level: string;
 };
 
+// Moved ModelParams here to avoid circular dependencies with apis/index.ts
+export interface ModelParams {
+	// Define properties if known, or leave empty for now
+  stop?: string[]; // Example, based on common usage
+}
+
 type Settings = {
 	models?: string[];
 	conversationMode?: boolean;
@@ -143,6 +209,17 @@ type Settings = {
 	splitLargeDeltas?: boolean;
 	chatDirection: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
+	scrollOnBranchChange?: boolean; // Added
+	hapticFeedback?: boolean; // Added
+	responseAutoCopy?: boolean; // Added
+	richTextInput?: boolean; // Added
+	memory?: boolean; // Added
+	userLocation?: { latitude: number; longitude: number } | null; // Added
+	webSearch?: boolean | 'always'; // Added
+	autoTags?: boolean; // Added
+	backgroundImageUrl?: string; // Added
+	landingPageMode?: string; // Added
+	params?: ModelParams; // Added (already had ModelOptions, this is more general)
 
 	system?: string;
 	requestFormat?: string;

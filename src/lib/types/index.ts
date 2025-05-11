@@ -9,7 +9,9 @@ export type Banner = {
 };
 
 export enum TTS_RESPONSE_SPLIT {
-	PUNCTUATION = 'punctuation',
-	PARAGRAPHS = 'paragraphs',
-	NONE = 'none'
+PUNCTUATION = 'punctuation',
+PARAGRAPHS = 'paragraphs',
+NONE = 'none'
 }
+
+export * from './tools';
