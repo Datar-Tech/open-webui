@@ -52,21 +52,21 @@
     - 如果否，則使用現有機制。
 - **使用者介面/體驗 (UI/UX)：**
     - **本地工具自動探索與新增 (單一預設端點)：**
-        - Open WebUI 前端將在**每次應用程式載入時**自動嘗試連接至單一預設的本地 MCP 伺服器端點：`http://localhost:8000/sse`。
+        - Open WebUI 前端將在**每次應用程式載入時**自動嘗試連接至單一預設的本地 MCP 伺服器端點：`http://localhost:8000/sse` (此預設端點 URL 定義於 `src/lib/constants.ts` 中的 `DEFAULT_LOCAL_MCP_SSE_ENDPOINT` 常數)。此邏輯主要實作於 `src/routes/(app)/+layout.svelte` 的 `onMount` 生命週期鉤子中，透過呼叫 `discoverDefaultLocalMcpServer` 函數來完成。
         - 如果連接成功並通過 MCP `initialize` 握手獲取到有效的工具能力，系統將更新 `localStorage` 中對應的工具資訊（包括能力清單）。這些工具將被視為可用的本地工具。
         - 此機制確保了每次載入應用程式時，本地工具的狀態和能力都與本地伺服器的最新狀態同步（類似於透過重新整理網頁更新能力）。
         - 系統不會掃描其他埠號或路徑，也不提供手動輸入其他本地 MCP 伺服器 URL 的介面。
         - 顯示掃描結果（針對此單一端點的嘗試結果），若成功則列出其提供的工具並更新存儲。
     - **統一的工具列表顯示與互動 (於聊天介面):**
-        - **位置:** 在聊天輸入框附近或與模型選擇器關聯的區域，通常透過一個「工具圖示 (Tool ICON)」觸發展開一個下拉清單或彈出式選單。此列表的實現預計會在 `src/lib/components/chat/ToolIconDisplay.svelte` (或具備類似功能的元件) 中。
-        - **內容:** 此列表將統一展示所有使用者已新增並可用的工具，包括：
+        - **位置:** 在聊天輸入框附近或與模型選擇器關聯的區域，通常透過一個「工具圖示 (Tool ICON)」觸發展開一個下拉清單或彈出式選單。此列表的實現主要位於 `src/lib/components/chat/ToolServersModal.svelte` 元件中。
+        - **內容:** 此列表將統一展示所有使用者已新增並可用的工具（資料來源於 `allAvailableTools` 衍生 store，該 store 結合了後端工具和 `localMcpTools` store 中的本地工具），包括：
             - 後端代理的外部工具伺服器提供的工具。
-            - 使用者新增的本地 MCP 工具（透過手動設定或掃描探索新增）。
-        - **顯示資訊:** 每個工具條目應至少清晰顯示工具的名稱。可考慮加入一個文字標籤（"Local"）來區分本地工具與遠端工具，以提升使用者識別度。
+            - 使用者新增的本地 MCP 工具（透過自動探索或未來可能的手動設定新增）。
+        - **顯示資訊:** 每個工具條目應至少清晰顯示工具的名稱。`ToolServersModal.svelte` 中會為本地工具加入一個文字標籤（"Local"）來區分本地工具與遠端工具。
         - **互動機制:**
-            - 使用者可以透過列表中的勾選框 (checkbox) 或開關 (toggle switch) 為每個工具進行獨立的啟用或停用操作。此操作決定了哪些工具將參與到當前的聊天對話中。
+            - 使用者可以透過 `ToolServersModal.svelte` 中的勾選框 (checkbox) 為每個工具進行獨立的啟用或停用操作。此操作決定了哪些工具將參與到當前的聊天對話中。
             - 工具的選擇狀態（啟用/停用）應在介面上清晰反映。
-            - 此選擇狀態應與當前聊天會話的上下文相關聯，其狀態管理可能涉及 `toolStore.ts` 或與聊天會話相關的特定狀態存儲。
+            - 此選擇狀態與當前聊天會話的上下文相關聯，其狀態管理涉及 `src/lib/stores/index.ts` 中的 `localMcpTools` store (用於本地工具的啟用狀態持久化) 和傳遞給 Modal 的 `selectedToolIds` prop。
         - **即時性與響應性:** 當使用者在應用程式設定中新增、移除或修改工具組態後，聊天介面中呈現的此工具列表應能動態更新以反映最新狀態（例如，即時更新或在下一次聊天會話載入時更新）。
     - 清晰標示本地工具呼叫。
     - 針對本地呼叫失敗的特定錯誤訊息（例如，「無法連線至本地伺服器」、「本地伺服器 CORS 問題：請檢查您的本地伺服器 CORS 設定」、「MCP 初始化失敗或無效的能力清單」）。
@@ -95,39 +95,46 @@
 基於 Open WebUI 典型的 SvelteKit 結構 (`src/` 目錄)：
 
 
-**4.3. 狀態管理 (位於 `src/lib/stores/`)**
-- `toolStore.ts` (或類似檔案):
-    - 擴展狀態以包含工具定義的 `isLocalClientCall: boolean` 和 `localMcpServerUrl?: string` (完整 MCP 端點 URL)。
-    - 新增/修改用於對這些本地工具設定執行 CRUD 操作的 actions，包括處理透過掃描新增的工具。
-    - 儲存從本地 MCP 伺服器 `initialize` 請求中獲取的能力清單，以便在聊天介面中顯示和選用。
-    - 已探索工具的持久化：當透過探索發現的工具時，這個設定儲存在瀏覽器的 `localStorage`
+**4.3. 狀態管理 (主要實作於 `src/lib/stores/index.ts`)**
+- 在 `src/lib/stores/index.ts` 中：
+    - 新增 `localMcpTools: Writable<LocalClientToolServerConfig[]>` store，用於儲存本地 MCP 伺服器的設定（包括從 `initialize` 請求中獲取的能力清單 `discoveredCapabilities`、`serverInfo`、`messagePath` 等），並將其持久化到瀏覽器的 `localStorage` (key: `open-webui_local-mcp-tools`)。
+    - 現有的 `tools: Writable<Tool[] | null>` store 用於儲存後端提供的工具。
+    - `Tool` 型別 (定義於 `src/lib/types/tools.ts`) 已擴展，增加了 `isLocalClientCall?: boolean`、`localMcpServerUrl?: string` 和 `capabilities?: McpCapability[]` 欄位以支援本地工具。
+    - `availableTools` store (`writable<Tool[]>([])`) 作為一個整合的工具列表，其內容會由 `src/lib/components/chat/ToolServersModal.svelte` 中的衍生 store `allAvailableTools` 動態產生，結合後端工具和啟用的本地 MCP 工具。
 
 
-**4.4. 新增核心前端邏輯 (位於 `src/lib/utils/` 或 `src/lib/services/`)**
-- `localClientToolExecutor.ts`:
-    - `initializeAndGetCapabilities(mcpSseEndpointUrl: string): Promise<McpSseInitializeResult>`: 向指定的 MCP SSE 端點 URL (例如 `http://localhost:{port}/sse`) 發送初始 **HTTP GET** 請求 (透過 `EventSource`，內含 5 秒握手超時)。解析回應，提取 `capabilities`、`serverInfo` 以及 `messagePath`。
+**4.4. 新增核心前端邏輯 (主要實作於 `src/lib/utils/localClientToolExecutor.ts`)**
+- 在 `src/lib/utils/localClientToolExecutor.ts` 中定義並導出以下核心函數：
+    - `initializeAndGetCapabilities(mcpSseEndpointUrl: string): Promise<McpSseInitializeResult>`: 向指定的 MCP SSE 端點 URL (例如 `http://localhost:{port}/sse`，其中 `/sse` 路徑來自 `MCP_DEFAULT_PATH` 常數) 發送初始 **HTTP GET** 請求 (透過 `EventSource`，內含 `MCP_SSE_INIT_TIMEOUT_MS` 定義的 5 秒握手超時)。解析回應，提取 `capabilities`、`serverInfo` 以及 `messagePath`。
     - `executeLocalClientTool(params: any, capabilityInvocationDetails: McpHttpInvocation, mcpBaseUrl: string, messagePath: string): Promise<any>`: (簽名已更新) 根據已獲取的 MCP 能力的 `http` `invocation` 細節和 `messagePath`，建構並向本地工具伺服器（使用 `mcpBaseUrl` 和 `messagePath` 組成目標 URL）發送標準 **HTTP POST** 請求 (`fetch` API)。
-    - `discoverLocalMcpServers(ports: number[], mcpSsePath: string = '/sse'): Promise<DiscoveredServer[]>`: (參數 `mcpPath` 更新為 `mcpSsePath` 且預設值為 `/sse`) 嘗試在指定的本地埠號列表上的 `mcpSsePath` 路徑進行 MCP `initialize` **HTTP GET** 握手 (透過呼叫 `initializeAndGetCapabilities`)，並返回成功回應的伺服器及其能力摘要。
-    - 掃描超時時間: 每個埠號的探索嘗試（呼叫 `initializeAndGetCapabilities`）包含一個 5 秒的 SSE 初始化握手超時。PRD 原提及的 10 秒掃描超時可能是指對單一埠號整體探索嘗試的期望時間上限。
+    - `discoverLocalMcpServers(ports: number[], mcpSsePath: string = '/sse'): Promise<DiscoveredServer[]>`: (參數 `mcpSsePath` 預設值為 `/sse`，來自 `MCP_DEFAULT_PATH`) 嘗試在指定的本地埠號列表上的 `mcpSsePath` 路徑進行 MCP `initialize` **HTTP GET** 握手 (透過呼叫 `initializeAndGetCapabilities`)，並返回成功回應的伺服器及其能力摘要。
+    - 掃描超時時間: 每個埠號的探索嘗試（呼叫 `initializeAndGetCapabilities`）包含一個 5 秒的 SSE 初始化握手超時 (`MCP_SSE_INIT_TIMEOUT_MS`)。PRD 原提及的 10 秒掃描超時 (`DISCOVERY_TIMEOUT_MS` 在程式碼中定義但未直接用於 `discoverLocalMcpServers` 的整體超時控制) 可能是指對單一埠號整體探索嘗試的期望時間上限。
 
 
-**4.5. 修改聊天邏輯 (位於 `src/routes/(app)/chat/[[id]]/+page.svelte` 及其相關模組/元件)**
-- **工具清單整合與啟用/停用 (主要於 `src/lib/components/chat/ToolIconDisplay.svelte` 或類似元件):**
-    - **資料獲取:** 從 `toolStore.ts` (或相關狀態管理器) 獲取所有已配置的工具定義。這包括 `isLocalClientCall` 標記、`localMcpServerUrl` (針對本地MCP工具)，以及從後端獲取的遠端工具的相關資訊。
+**4.5. 修改聊天邏輯與使用者介面**
+- **本地工具自動探索 (主要實作於 `src/routes/(app)/+layout.svelte`)**:
+    - 在 `onMount` 生命週期鉤子中呼叫 `discoverDefaultLocalMcpServer` 函數。
+    - 此函數使用 `src/lib/utils/localClientToolExecutor.ts` 中的 `initializeAndGetCapabilities` 嘗試連接預設本地 MCP 端點 (`DEFAULT_LOCAL_MCP_SSE_ENDPOINT`，定義於 `src/lib/constants.ts`)。
+    - 成功後，更新 `src/lib/stores/index.ts` 中的 `localMcpTools` store。
+- **工具清單整合與啟用/停用 (主要實作於 `src/lib/components/chat/ToolServersModal.svelte`)**:
+    - **資料獲取:** 從 `src/lib/stores/index.ts` 獲取 `tools` (後端工具) 和 `localMcpTools` (本地工具設定)。透過 Svelte 的 `derived` store (`allAvailableTools`) 將兩者結合成統一的工具列表。
     - **列表渲染與互動:**
-        - 動態渲染工具列表，為每個工具提供一個勾選框 (checkbox) 或開關 (toggle switch)，允許使用者為當前聊天會話啟用或停用該工具。
-        - 可考慮為本地工具在列表中添加視覺提示（例如，特定的圖示或文字標籤如 "本地"），以便使用者區分。
-    - **狀態管理:** 使用者對工具的啟用/停用選擇需要被有效管理。此狀態可能儲存在當前聊天會話的狀態對象中，或透過 `toolStore.ts` 更新工具的活躍狀態標記，確保選擇在會話中保持一致。
-    - **UI 反饋:** 介面應清晰顯示哪些工具目前為啟用狀態，例如，透過勾選框的狀態或工具圖示的變化。
-- **工具分派：** 當觸發工具呼叫時，檢查 `tool.isLocalClientCall`。如果為 true，則先確保已初始化並獲取能力清單 (可能需要快取或從 `toolStore` 讀取)，然後呼叫 `localClientToolExecutor.executeLocalClientTool`。否則，繼續使用後端介導的呼叫。
-- **UI 回饋：** 顯示本地工具呼叫的載入狀態和特定錯誤訊息。
-- `src/lib/components/chat/ChatMessage.svelte`: 可能需要更新以反映本地工具的執行情況。
-- `src/lib/components/chat/ToolIconDisplay.svelte` (或負責此功能的元件): 將是此功能的核心實現點。它將負責從 `toolStore` 讀取可用工具、渲染選擇列表、處理使用者的啟用/停用互動，並可能將當前啟用的工具集資訊傳遞給聊天消息發送邏輯或相關的上下文管理器。
+        - 動態渲染 `allAvailableTools` 列表，為每個工具提供一個勾選框 (checkbox)，允許使用者為當前聊天會話啟用或停用該工具。
+        - 為本地工具在列表中添加視覺提示（"Local" 標籤）。
+    - **狀態管理:** 使用者對工具的啟用/停用選擇會更新傳入的 `selectedToolIds` prop，並間接影響 `localMcpTools` store 中對應工具的 `enabled` 狀態（此部分邏輯可能在父元件或更高層次處理，Modal 本身主要反映和修改 `selectedToolIds`）。
+- **工具分派邏輯 (預期在例如 `src/lib/components/chat/Chat.svelte` 或相關的訊息處理邏輯中修改):**
+    - 當觸發工具呼叫時，檢查 `tool.isLocalClientCall` 標記。
+    - 如果為 `true`，則使用 `src/lib/utils/localClientToolExecutor.ts` 中的 `executeLocalClientTool` 執行前端呼叫。
+    - 否則，繼續使用後端介導的呼叫。
+- **UI 回饋：** 顯示本地工具呼叫的載入狀態和特定錯誤訊息 (相關 UI 元件如 `src/lib/components/chat/Messages/ResponseMessage/ToolCalls.svelte` 和 `src/lib/components/chat/ToolCall.svelte` 可能會被複用或調整以顯示本地工具的呼叫狀態和結果)。
+- `src/lib/components/chat/ChatMessage.svelte`: 可能需要更新以正確顯示包含本地工具呼叫或其結果的訊息。
 
-**4.6. 型別定義 (位於 `src/lib/types/` 或 `src/app.d.ts`)**
-- `LocalClientToolServerConfig` (更新以使用 `localMcpServerUrl`)。
-- `McpServerInfo`, `McpCapability`, `McpHttpInvocation` (以及其他必要 MCP 相關型別，用於儲存從 `initialize` 獲取的資訊)。
-- 擴展現有的 `Tool` 或 `ToolMetadata` 型別以反映本地 MCP 工具的特性。
+**4.6. 型別定義 (主要實作於 `src/lib/types/tools.ts` 並由 `src/lib/types/index.ts` 導出)**
+- 在 `src/lib/types/tools.ts` 中定義：
+    - `LocalClientToolServerConfig`: 用於儲存本地 MCP 伺服器的設定，包括 `mcpEndpointUrl`, `name`, `enabled`, `discoveredCapabilities`, `serverInfo`, `messagePath`。
+    - `McpServerInfo`, `McpCapability`, `McpHttpInvocation`, `McpSseInitializeResult`, `DiscoveredServer`: MCP 通訊協定相關的核心型別。
+    - 擴展現有的 `Tool` 型別，增加 `isLocalClientCall?: boolean`, `localMcpServerUrl?: string`, `capabilities?: McpCapability[]` 欄位。
+- `src/lib/types/index.ts` 使用 `export * from './tools';` 導出上述型別。
 
 **4.7. 後端 API (可選 - 用於設定持久化)**
 - 如先前定義。
