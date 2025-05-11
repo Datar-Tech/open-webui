@@ -1,6 +1,7 @@
 <script lang="ts">
 import { getContext, onMount } from 'svelte';
-import { derived } from 'svelte/store'; // Correct import for derived
+import { derived, type Writable } from 'svelte/store'; // Correct import for derived, added Writable
+import type { i18n as I18nInstanceType } from 'i18next'; // For typing the store's content
 import { models, config, toolServers, tools, localMcpTools } from '$lib/stores';
 import type { Tool, LocalClientToolServerConfig, McpCapability } from '$lib/types';
 
@@ -15,7 +16,7 @@ import { deleteSharedChatById, getChatById, shareChatById } from '$lib/apis/chat
 export let show = false;
 export let selectedToolIds: string[] = []; // Explicitly typed
 
-const i18n = getContext('i18n');
+const i18nStore = getContext<Writable<I18nInstanceType>>('i18n'); // Explicitly type the store
 
 // Combine backend tools and local MCP tools into a single list
 const allAvailableTools = derived<
@@ -61,7 +62,7 @@ function toggleToolSelection(toolId: string) {
 <Modal bind:show size="md">
 	<div>
 		<div class=" flex justify-between dark:text-gray-300 px-5 pt-4 pb-0.5">
-<div class=" text-lg font-medium self-center">{i18n.t('Available Tools')}</div>
+<div class=" text-lg font-medium self-center">{$i18nStore.t('Available Tools')}</div>
 			<button
 				class="self-center"
 				on:click={() => {
@@ -83,7 +84,7 @@ function toggleToolSelection(toolId: string) {
 
 <!-- Unified Tools List -->
 <div class=" flex justify-between dark:text-gray-300 px-5 pt-2 pb-1">
-  <div class=" text-base font-medium self-center">{i18n.t('Select Tools')}</div>
+  <div class=" text-base font-medium self-center">{$i18nStore.t('Select Tools')}</div>
 </div>
 
 <div class="px-5 pb-3 w-full flex flex-col justify-center max-h-96 overflow-y-auto">
@@ -105,7 +106,7 @@ function toggleToolSelection(toolId: string) {
                   {tool.name}
                 </div>
                 {#if tool.isLocalClientCall}
-                  <span class="ml-2 px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">{i18n.t('Local')}</span>
+                  <span class="ml-2 px-1.5 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">{$i18nStore.t('Local')}</span>
                 {/if}
               </div>
               {#if tool.meta?.description}
@@ -128,7 +129,7 @@ function toggleToolSelection(toolId: string) {
       {/each}
     </div>
   {:else}
-    <p class="text-sm text-gray-500 dark:text-gray-400 py-3 text-center">{i18n.t('No tools available.')}</p>
+    <p class="text-sm text-gray-500 dark:text-gray-400 py-3 text-center">{$i18nStore.t('No tools available.')}</p>
   {/if}
 </div>
 
@@ -136,15 +137,15 @@ function toggleToolSelection(toolId: string) {
 <!-- Existing Tool Servers (OpenAPI) informational display -->
 {#if $toolServers.length > 0}
 <div class=" flex justify-between dark:text-gray-300 px-5 pt-3 pb-0.5 border-t dark:border-gray-700">
-<div class=" text-base font-medium self-center">{i18n.t('Tool Servers')}</div>
+<div class=" text-base font-medium self-center">{$i18nStore.t('Tool Servers')}</div>
 </div>
 
 <div class="px-5 pb-5 w-full flex flex-col justify-center">
 <div class=" text-xs text-gray-600 dark:text-gray-300 mb-2">
-{i18n.t('Open WebUI can use tools provided by any OpenAPI server.')} <br /><a
+{$i18nStore.t('Open WebUI can use tools provided by any OpenAPI server.')} <br /><a
 class="underline"
 href="https://github.com/open-webui/openapi-servers"
-target="_blank">{i18n.t('Learn more about OpenAPI tool servers.')}</a
+target="_blank">{$i18nStore.t('Learn more about OpenAPI tool servers.')}</a
 >
 </div>
 				<div class=" text-sm dark:text-gray-300 mb-1">

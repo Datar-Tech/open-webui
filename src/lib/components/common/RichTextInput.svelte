@@ -187,7 +187,9 @@
 		editor = new Editor({
 			element: element,
 			extensions: [
-				StarterKit,
+				StarterKit.configure({
+					codeBlock: false // Disable StarterKit's default codeBlock
+				}),
 				CodeBlockLowlight.configure({
 					lowlight
 				}),
