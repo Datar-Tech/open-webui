@@ -1108,31 +1108,31 @@
 											</button>
 										</InputMenu>
 
-										<div class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1">
-											{#if toolServers.length + selectedToolIds.length > 0}
-												<Tooltip
-													content={$i18n.t('{{COUNT}} Available Tools', {
-														COUNT: toolServers.length + selectedToolIds.length
-													})}
-												>
-													<button
-														class="translate-y-[0.5px] flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg p-1 self-center transition"
-														aria-label="Available Tools"
-														type="button"
-														on:click={() => {
-															showTools = !showTools;
-														}}
-													>
-														<Wrench className="size-4" strokeWidth="1.75" />
+<div class="flex gap-1 items-center overflow-x-auto scrollbar-none flex-1">
+{#if toolServers.length > 0}
+<Tooltip
+content={$i18n.t('{{COUNT}} Available Tools', {
+COUNT: toolServers.length
+})}
+>
+<button
+class="translate-y-[0.5px] flex gap-1 items-center text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg p-1 self-center transition"
+aria-label="Available Tools"
+type="button"
+on:click={() => {
+showTools = !showTools;
+}}
+>
+<Wrench className="size-4" strokeWidth="1.75" />
 
-														<span class="text-sm font-medium text-gray-600 dark:text-gray-300">
-															{toolServers.length + selectedToolIds.length}
-														</span>
-													</button>
-												</Tooltip>
-											{/if}
+<span class="text-sm font-medium text-gray-600 dark:text-gray-300">
+{toolServers.length}
+</span>
+</button>
+</Tooltip>
+{/if}
 
-											{#if $_user}
+{#if $_user}
 												{#if $config?.features?.enable_web_search && ($_user.role === 'admin' || $_user?.permissions?.features?.web_search)}
 													<Tooltip content={$i18n.t('Search the internet')} placement="top">
 														<button

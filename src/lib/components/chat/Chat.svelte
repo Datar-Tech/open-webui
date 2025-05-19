@@ -149,13 +149,16 @@
 	$: {
 		console.log('[Debug] Reactive block for toolServers update triggered.');
 		if (typeof window !== 'undefined' && $localMcpTools && selectedToolIds) {
-			console.log('[Debug] selectedToolIds:', JSON.parse(JSON.stringify(selectedToolIds)));
-			console.log('[Debug] $localMcpTools:', JSON.parse(JSON.stringify($localMcpTools)));
+console.log('[Debug] selectedToolIds:', JSON.parse(JSON.stringify(selectedToolIds)));
+console.log('[Debug] $localMcpTools:', JSON.parse(JSON.stringify($localMcpTools)));
 
-			const activeLocalServers: ToolServerType[] = [];
-			const processedServerUrls = new Set<string>();
+const currentBackendServers = get(toolServers).filter(server => !server.isLocalMcpServer);
+console.log('[Debug] currentBackendServers:', JSON.parse(JSON.stringify(currentBackendServers)));
 
-			const getMcpEndpointUrlFromToolId = (toolId: string): string | null => {
+const activeLocalServers: ToolServerType[] = [];
+const processedServerUrls = new Set<string>();
+
+const getMcpEndpointUrlFromToolId = (toolId: string): string | null => {
 				let potentialUrl: string | null = null;
 				try {
 					const hashIndex = toolId.lastIndexOf('#');
@@ -204,11 +207,12 @@
 						processedServerUrls.add(mcpEndpointUrl);
 					}
 				}
-			}
-			console.log('[Debug] activeLocalServers to be set:', JSON.parse(JSON.stringify(activeLocalServers)));
-			toolServers.set(activeLocalServers);
-			console.log('[Debug] $toolServers store updated to:', JSON.parse(JSON.stringify(get(toolServers))));
-		} else {
+}
+console.log('[Debug] activeLocalServers to be combined:', JSON.parse(JSON.stringify(activeLocalServers)));
+const combinedToolServers = [...currentBackendServers, ...activeLocalServers];
+toolServers.set(combinedToolServers);
+console.log('[Debug] $toolServers store updated to (combined):', JSON.parse(JSON.stringify(get(toolServers))));
+} else {
 			// console.log('[Debug] Reactive block conditions not met (window undefined, or stores not ready).');
 		}
 	}

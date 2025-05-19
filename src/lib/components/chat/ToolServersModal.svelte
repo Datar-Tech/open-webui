@@ -3,7 +3,7 @@ import { getContext, onMount } from 'svelte';
 import { derived, type Writable } from 'svelte/store'; // Correct import for derived, added Writable
 import type { i18n as I18nInstanceType } from 'i18next'; // For typing the store's content
 import { models, config, toolServers, tools, localMcpTools } from '$lib/stores';
-import type { Tool, LocalClientToolServerConfig, McpCapability } from '$lib/types';
+import type { Tool, LocalClientToolServerConfig, McpCapability, ToolServer } from '$lib/types'; // Added ToolServer
 
 import { toast } from 'svelte-sonner';
 import { deleteSharedChatById, getChatById, shareChatById } from '$lib/apis/chats';
@@ -18,9 +18,23 @@ export let selectedToolIds: string[] = []; // Explicitly typed
 
 const i18nStore = getContext<Writable<I18nInstanceType>>('i18n'); // Explicitly type the store
 
+// Initialize selectedToolIds with all available tools when the modal is shown for a "new" selection
+// or when allAvailableTools changes and selectedToolIds is empty.
+$: if (show && $allAvailableTools.length > 0 && selectedToolIds.length === 0) {
+  selectedToolIds = $allAvailableTools.map(tool => tool.id);
+  console.log('[Debug ToolServersModal] Initialized selectedToolIds with all tools:', JSON.parse(JSON.stringify(selectedToolIds)));
+}
+
+// Also handle the case where allAvailableTools updates while the modal is already open
+// and we want to auto-select new tools if selectedToolIds was reflecting "all selected".
+// This is a bit more complex if we want to preserve de-selections.
+// For now, the above handles the "select all on first open / empty selection"
+// and "newly discovered tools are part of allAvailableTools and will be selected if modal is opened fresh".
+
 $: if (show) {
   console.log('All Available Tools in Modal (when shown):', $allAvailableTools);
 }
+
 
 // Combine backend tools and local MCP tools into a single list
 const allAvailableTools = derived<
@@ -47,6 +61,20 @@ const allAvailableTools = derived<
       }
     });
     return [...backendTools, ...localTools];
+  }
+);
+
+// NEW: Derived store for the "Tool Servers" informational list
+const displayableOpenApiServers = derived<
+  typeof toolServers,
+  ToolServer[] // Or the correct type for items in $toolServers
+>(
+  toolServers,
+  ($toolServers_val) => {
+    if (!$toolServers_val) return [];
+    // Filter to only include servers that have an 'openapi.info.title'
+    // This distinguishes actual OpenAPI servers from local MCP server representations.
+    return $toolServers_val.filter(server => server?.openapi?.info?.title);
   }
 );
 
@@ -97,14 +125,16 @@ function toggleToolSelection(toolId: string) {
     <div class=" text-sm dark:text-gray-300 mb-1">
       {#each $allAvailableTools as tool (tool.id)}
         <div class="flex items-center mb-1 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-          <input
-            type="checkbox"
-            id={`tool-checkbox-${tool.id}`}
-            class="mr-3 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-            checked={selectedToolIds.includes(tool.id)}
-            on:change={() => toggleToolSelection(tool.id)}
-          />
-          <label for={`tool-checkbox-${tool.id}`} class="flex-1 cursor-pointer">
+          <label class="switch">
+            <input
+              type="checkbox"
+              id={`tool-switch-${tool.id}`}
+              checked={selectedToolIds.includes(tool.id)}
+              on:change={() => toggleToolSelection(tool.id)}
+            />
+            <span class="slider round"></span>
+          </label>
+          <label for={`tool-switch-${tool.id}`} class="flex-1 cursor-pointer ml-3">
             <Collapsible buttonClassName="w-full -ml-2" chevron={false}>
               <div class="flex items-center">
                 <div class="text-sm font-medium dark:text-gray-100 text-gray-800">
@@ -140,7 +170,7 @@ function toggleToolSelection(toolId: string) {
 
 
 <!-- Existing Tool Servers (OpenAPI) informational display -->
-{#if $toolServers.length > 0}
+{#if $displayableOpenApiServers.length > 0}
 <div class=" flex justify-between dark:text-gray-300 px-5 pt-3 pb-0.5 border-t dark:border-gray-700">
 <div class=" text-base font-medium self-center">{$i18nStore.t('Tool Servers')}</div>
 </div>
@@ -154,7 +184,7 @@ target="_blank">{$i18nStore.t('Learn more about OpenAPI tool servers.')}</a
 >
 </div>
 				<div class=" text-sm dark:text-gray-300 mb-1">
-					{#each $toolServers as toolServer}
+					{#each $displayableOpenApiServers as toolServer}
 						<Collapsible buttonClassName="w-full" chevron>
 							<div>
 								<div class="text-sm font-medium dark:text-gray-100 text-gray-800">
@@ -190,3 +220,59 @@ target="_blank">{$i18nStore.t('Learn more about OpenAPI tool servers.')}</a
 		{/if}
 	</div>
 </Modal>
+
+<style>
+  /* Basic Switch CSS */
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 34px;
+    height: 20px;
+  }
+
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    -webkit-transition: .4s;
+    transition: .4s;
+    border-radius: 20px; /* Rounded slider */
+  }
+
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 12px;
+    width: 12px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    -webkit-transition: .4s;
+    transition: .4s;
+    border-radius: 50%; /* Rounded handle */
+  }
+
+  input:checked + .slider {
+    background-color: #2196F3; /* Blue color when checked */
+  }
+
+  input:focus + .slider {
+    box-shadow: 0 0 1px #2196F3;
+  }
+
+  input:checked + .slider:before {
+    -webkit-transform: translateX(14px); /* Move handle to the right */
+    -ms-transform: translateX(14px);
+    transform: translateX(14px);
+  }
+</style>

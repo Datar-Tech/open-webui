@@ -75,5 +75,19 @@
 ## In Progress:
 
 
-## Next Steps (Revised based on current progress):
+## Completed Tasks (Documentation Updates):
 
+1.  **PRD Update (`Roger/local_MCP_Server_prd.md`):** Updated to reflect the requirement for switch buttons instead of checkboxes in the tool selection UI and the default enabled state for tools.
+
+## Completed Tasks (UI and Logic Updates):
+
+1.  **Tool Selection UI Update (`src/lib/components/chat/ToolServersModal.svelte`):**
+    *   Replaced checkbox inputs with basic HTML/CSS switch buttons for tool selection.
+    *   Added CSS for the switch button styling.
+    *   Implemented logic to ensure all available tools are selected by default when the modal is opened and no tools are currently selected (e.g., for a new chat session).
+2.  **Tool Count Display Fix (`src/lib/components/chat/MessageInput.svelte`):**
+    *   Identified that the tool count display was incorrectly summing the number of available tools and selected tools (`$displayedToolServers.length + selectedToolIds.length`).
+    *   Corrected the logic to display only the number of available tools (`$displayedToolServers.length`), aligning with the tooltip "Available Tools" and user expectations.
+    *   Updated the conditional rendering of the tool button and the count in the tooltip to use the corrected length.
+
+## Next Steps (Revised based on current progress):
