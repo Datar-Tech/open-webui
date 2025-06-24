@@ -1678,7 +1678,22 @@
 						id: 'local-mcpo-instance', // A unique ID for the local MCPO server instance
 						name: 'Local MCPO',
 						url: DEFAULT_MCPO_BASE_URL,
-						specs: $localMcpoTools.filter(t => t.enabled).map(t => t.spec) // Send only enabled local tool specs
+						// This should be a 'tools' array of Tool objects
+						tools: $localMcpoTools.filter(t => t.enabled).map(localTool => {
+							return {
+								id: localTool.id,
+								name: localTool.name,
+								description: localTool.spec.info.description,
+								spec: localTool.spec, // spec is the full OpenAPI document
+								type: 'local_mcpo',
+								enabled: localTool.enabled,
+								metadata: { 
+									baseUrl: localTool.baseUrl, 
+									openapiPath: localTool.openapiPath,
+									operationId: localTool.operationId // <-- 添加這一行
+								}
+							} as Tool;
+						})
 					}] : [])
 				],
 

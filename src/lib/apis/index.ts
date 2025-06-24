@@ -357,13 +357,28 @@ export const getToolServersData = async (i18n, servers: object[]) => {
 					});
 
 					if (data) {
-						const { openapi, info, specs } = data;
+						const { openapi, info, specs } = data; // openapi 是完整的 OpenAPI 文件，specs 是單個工具定義列表
+
+						// 為 ToolServerConnection 構建 tools 陣列
+						const toolsArray: Tool[] = specs.map((individualToolSpec: any) => {
+							return {
+								id: `${server?.url}-${individualToolSpec.name}`, // 工具的唯一 ID
+								name: individualToolSpec.name,
+								description: individualToolSpec.description,
+								spec: openapi, // 關鍵點：將完整的 OpenAPI 文件傳遞給 Tool.spec
+								type: 'openapi', // 或 'local_mcpo' (如果適用)
+								enabled: true, // 預設啟用
+								metadata: { serverName: info.title, serverUrl: server?.url }
+							} as Tool;
+						});
+
 						return {
+							id: server?.id || server?.url, // 伺服器連接的 ID
+							name: info.title || server?.name || server?.url, // 伺服器連接的名稱
 							url: server?.url,
-							openapi: openapi,
-							info: info,
-							specs: specs
-						};
+							tools: toolsArray, // 這是正確構建的 tools 陣列
+							enabled: server?.config?.enable ?? true // 確保啟用狀態被傳遞
+						} as ToolServerConnection;
 					}
 				})
 		)

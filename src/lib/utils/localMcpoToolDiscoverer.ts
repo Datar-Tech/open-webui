@@ -92,13 +92,33 @@ export async function discoverLocalMcpoTools(): Promise<void> {
 						return null;
 					}
 					const toolSpec = (await toolResponse.json()) as OpenAPISpec;
+					
+					let extractedOperationId: string | undefined;
+					// 從 toolSpec (完整的子工具 OpenAPI 文件) 中提取 operationId
+					if (toolSpec.paths) {
+						for (const pathKey in toolSpec.paths) {
+							const pathItem = toolSpec.paths[pathKey];
+							if (typeof pathItem === 'object' && pathItem !== null) {
+								for (const httpMethod in pathItem) {
+									const operation = pathItem[httpMethod];
+									if (typeof operation === 'object' && operation !== null && operation.operationId) {
+										extractedOperationId = operation.operationId;
+										break; // 假設每個子工具規格只定義一個操作，或取第一個
+									}
+								}
+							}
+							if (extractedOperationId) break;
+						}
+					}
+
 					return {
 						id: `${DEFAULT_MCPO_BASE_URL}${subPath}`, 
 						name: toolSpec.info?.title || subPath.split('/')[1] || 'Unnamed SubTool',
 						baseUrl: DEFAULT_MCPO_BASE_URL,
 						openapiPath: subPath,
 						spec: toolSpec,
-						enabled: true 
+						enabled: true,
+						operationId: extractedOperationId // 將提取到的 operationId 賦值給此處
 					} as LocalMcpoToolConfig;
 				} catch (error) {
 					console.error(`Error fetching/parsing sub-tool spec from ${toolSpecUrl}:`, error);
@@ -132,10 +152,10 @@ export async function discoverLocalMcpoTools(): Promise<void> {
 						const finalToolName = toolName.trim() === '' ? `Operation: ${methodKey.toUpperCase()} ${pathKey}` : toolName;
 
 						const toolConfig: LocalMcpoToolConfig = {
-							id: `${DEFAULT_MCPO_BASE_URL}/openapi.json${pathKey}_${methodKey}`, // Unique ID for the operation
+							id: `${DEFAULT_MCPO_BASE_URL}${pathKey}_${methodKey}`, // Unique ID for the operation
 							name: finalToolName,
 							baseUrl: DEFAULT_MCPO_BASE_URL,
-							openapiPath: '/openapi.json', // Source is the main spec
+							openapiPath: pathKey, // Source is the main spec
 							spec: mainSpec, // The whole mainSpec is the context
 							enabled: true, // Default to enabled
 							pathKey: pathKey,

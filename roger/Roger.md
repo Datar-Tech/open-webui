@@ -55,6 +55,13 @@ uv pip install -r backend/requirements.txt
 
 # Run the backend server (Windows)
 .\start_windows.bat
+
+# Debug mode
+$env:WEBUI_DEBUG=1 ; .\start_windows.bat
+
+$env:WEBUI_DEBUG=1 ; python -m debugpy --listen 0.0.0.0:5678 --wait-for-client --log-to-stderr uvicorn open_webui.main:app --host "$env:HOST" --port "$env:PORT" --forwarded-allow-ips '*' --workers "$env:UVICORN_WORKERS" --ws auto
+
+
 ```
 
 The backend server will start on http://localhost:8080.

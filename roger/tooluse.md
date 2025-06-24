@@ -159,3 +159,13 @@
 *   **調用時：**
     *   **前端負責調用外部 OpenAPI Tool Servers**，直接向其端點發起 HTTP 請求。
     *   **後端負責調用內部 Python 工具**，直接執行其 Python 程式碼。
+
+
+## Call Stack
+
+generate_chat_completion (c:\Github\open-webui-0.6.5\backend\open_webui\routers\openai.py:705)
+generate_chat_completion (c:\Github\open-webui-0.6.5\backend\open_webui\utils\chat.py:275)
+chat_completion_tools_handler (c:\Github\open-webui-0.6.5\backend\open_webui\utils\middleware.py:165)
+process_chat_payload (c:\Github\open-webui-0.6.5\backend\open_webui\utils\middleware.py:874)
+chat_completion (c:\Github\open-webui-0.6.5\backend\open_webui\main.py:1130)
+run_endpoint_function (C:\Github\open-webui-0.6.5\venv\Lib\site-packages\fastapi\routing.py:212)

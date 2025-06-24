@@ -11,7 +11,7 @@ import random
 import json
 import html
 import inspect
-import re # Import re for regex
+import re
 import ast
 
 from uuid import uuid4
@@ -68,7 +68,8 @@ from open_webui.utils.misc import (
     prepend_to_first_user_message_content,
     convert_logit_bias_input_to_json,
 )
-from open_webui.utils.tools import get_tools
+from open_webui.utils.tools import get_tools, convert_openapi_to_tool_payload
+
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.filter import (
     get_sorted_filter_ids,
@@ -191,71 +192,15 @@ async def chat_completion_tools_handler(
                 try:
                     tool = tools[tool_function_name]
 
-                    spec = tool.get("spec", {}) # spec is the full OpenAPI document for the tool's server
-                    
-                    allowed_params_keys = set()
-                    
-                    # Determine the operation_object from the spec using tool's pathKey and methodKey
-                    # Ensure tool.get("pathKey") and tool.get("methodKey") exist and provide defaults if not
-                    current_path_key = tool.get("pathKey", "")
-                    current_method_key = tool.get("methodKey", "").lower()
-
-                    path_item_object = spec.get("paths", {}).get(current_path_key, {})
-                    operation_object = path_item_object.get(current_method_key, {})
-                    
-                    # Extract allowed parameter keys from requestBody schema
-                    if operation_object and "requestBody" in operation_object:
-                        request_body_content = operation_object.get("requestBody", {}).get("content", {})
-                        # Iterate over supported content types, prioritizing application/json
-                        for content_type, media_type_object in request_body_content.items():
-                            if "application/json" in content_type: # Prioritize json
-                                request_body_schema = media_type_object.get("schema", {})
-                                
-                                # Resolve $ref if present
-                                if "$ref" in request_body_schema:
-                                    ref_path = request_body_schema["$ref"].split('/')
-                                    schema_name = ref_path[-1]
-                                    actual_schema = spec.get("components", {}).get("schemas", {}).get(schema_name, {})
-                                    allowed_params_keys.update(actual_schema.get("properties", {}).keys())
-                                elif "properties" in request_body_schema: # Inline schema
-                                    allowed_params_keys.update(request_body_schema.get("properties", {}).keys())
-                                # break # Found application/json, consider if other content types for params are needed
-                    
-                    # Extract allowed parameter keys from operation-level parameters (query, path, header)
-                    if operation_object and "parameters" in operation_object:
-                        for param_def in operation_object.get("parameters", []):
-                            # Handle $ref for parameters
-                            if isinstance(param_def, dict) and "$ref" in param_def:
-                                ref_path = param_def["$ref"].split('/')
-                                param_name_ref = ref_path[-1]
-                                actual_param_def = spec.get("components", {}).get("parameters", {}).get(param_name_ref, {})
-                                if "name" in actual_param_def:
-                                    allowed_params_keys.add(actual_param_def["name"])
-                            elif isinstance(param_def, dict) and "name" in param_def: # Parameter is defined inline
-                                allowed_params_keys.add(param_def["name"])
-
-                    # Filter the parameters from LLM based on the extracted allowed_params_keys
-                    if not allowed_params_keys:
-                        # If no parameters are defined in the spec for this operation,
-                        # and the original tool_function_params is not empty, it implies LLM hallucinated params.
-                        # If the tool truly takes no arguments, tool_function_params should be empty.
-                        # If LLM provides params but spec says none, strip them.
-                        if tool_function_params: # If LLM provided params but spec doesn't define any
-                             log.warning(f"LLM provided parameters for {tool_function_name} but none are defined in its OpenAPI spec. Stripping params.")
-                        tool_function_params = {}
-                    else:
-                        original_params_from_llm = tool_function_params.copy()
-                        tool_function_params = {
-                            k: v
-                            for k, v in tool_function_params.items()
-                            if k in allowed_params_keys
-                        }
-                        if len(tool_function_params) < len(original_params_from_llm):
-                            stripped_keys = set(original_params_from_llm.keys()) - set(tool_function_params.keys())
-                            log.warning(f"Stripped unexpected parameters for {tool_function_name}: {stripped_keys}")
-                    
-                    log.debug(f"Allowed params for {tool_function_name}: {allowed_params_keys}")
-                    log.debug(f"Filtered tool_function_params to be sent to frontend: {tool_function_params}")
+                    spec = tool.get("spec", {})
+                    allowed_params = (
+                        spec.get("parameters", {}).get("properties", {}).keys()
+                    )
+                    tool_function_params = {
+                        k: v
+                        for k, v in tool_function_params.items()
+                        if k in allowed_params
+                    }
 
                     if tool.get("direct", False):
                         tool_result = await event_caller(
@@ -906,42 +851,46 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         )
 
     if tool_servers:
-        for tool_server in tool_servers:
-            tool_specs = tool_server.pop("specs", [])
+        for tool_server_connection in tool_servers: # 這是 ToolServerConnection 物件
+            # 從 ToolServerConnection 中取出其包含的工具列表 (前端傳送的是 'tools' 鍵)
+            tools_from_connection = tool_server_connection.get("tools", [])
 
-            for tool_spec in tool_specs: # tool_spec is an OpenAPI document
-                if "paths" in tool_spec:
-                    for path_key, path_item_object in tool_spec["paths"].items():
-                        for method_key, operation_object in path_item_object.items():
-                            # Ensure it's a valid HTTP method and an object
-                            if isinstance(operation_object, dict) and method_key.lower() in ["get", "post", "put", "delete", "patch", "options", "head", "trace"]:
-                                operation_id = operation_object.get("operationId")
-                                
-                                if operation_id:
-                                    tools_dict[operation_id] = { # Key by operationId
-                                        "spec": tool_spec, # The full spec
-                                        "direct": True,
-                                        "server": tool_server,
-                                        "pathKey": path_key, # Store these for frontend execution
-                                        "methodKey": method_key,
-                                        "operationId": operation_id,
-                                    }
-                                else:
-                                    # Fallback if no operationId, create a unique name
-                                    # Use a more robust name derivation
-                                    # Example: "MyServer_hello_post"
-                                    derived_name = f"{tool_spec['info']['title'].replace(' ', '_').replace('-', '_').lower()}_{path_key.replace('/', '_').replace('-', '_').lower()}_{method_key.lower()}"
-                                    # Clean up multiple underscores
-                                    derived_name = re.sub(r'_{2,}', '_', derived_name).strip('_')
+            for tool_obj in tools_from_connection: # tool_obj 是單個 Tool 物件 (已包含 enabled 狀態)
+                full_openapi_doc = tool_obj.get("spec", {}) # 從 Tool 物件中取得完整的 OpenAPI 文件
+                
+                # 使用前端 tool_obj 中包含的技術性 operationId 進行匹配
+                # 這裡我們從 metadata 中獲取 operationId
+                frontend_operation_id = tool_obj.get("metadata", {}).get("operationId") 
+                frontend_toolname = tool_obj.get("name", {}) # 從 Tool 物件中取得完整的 OpenAPI 文件
+                
+                # 如果 metadata 中沒有 operationId，則退回到使用 tool_obj.id (因為使用者說 tool_obj.id 包含了技術性 operationId)
+                if not frontend_operation_id:
+                    frontend_operation_id = tool_obj.get("id") 
 
-                                    tools_dict[derived_name] = {
-                                        "spec": tool_spec,
-                                        "direct": True,
-                                        "server": tool_server,
-                                        "pathKey": path_key,
-                                        "methodKey": method_key,
-                                        "operationId": derived_name, # Use derived name as operationId
-                                    }
+                if full_openapi_doc and frontend_operation_id:
+                    # 將完整的 OpenAPI 文件轉換為單個工具定義的列表 (包含所有工具)
+                    all_individual_tool_specs = convert_openapi_to_tool_payload(full_openapi_doc)
+
+                    # 找到與當前 tool_obj 的 operation_id 相符的單個工具定義
+                    specific_tool_definition = next(
+                        (
+                            ts for ts in all_individual_tool_specs 
+                            if ts.get("name") == frontend_operation_id # 使用技術性 operationId 進行匹配
+                        ),
+                        None
+                    )
+
+                    if specific_tool_definition:
+                        tools_dict[frontend_toolname] = { # 以 operationId 作為鍵
+                            "spec": specific_tool_definition, # 這是單個工具定義 (只包含當前工具的定義)
+                            "direct": True,
+                            "server": tool_server_connection, # 傳遞整個連接物件作為上下文
+                            "operation_id": frontend_operation_id,
+                        }
+                    else:
+                        log.warning(f"Specific tool definition for '{frontend_operation_id}' not found in OpenAPI spec from server '{tool_server_connection.get('name', tool_server_connection.get('id', 'unknown'))}'.")
+                else:
+                    log.warning(f"Tool '{tool_obj.get('name', tool_obj.get('id', 'unknown'))}' from server '{tool_server_connection.get('name', tool_server_connection.get('id', 'unknown'))}' provided no valid OpenAPI specification or name.")
 
     if tools_dict:
         if metadata.get("function_calling") == "native":
