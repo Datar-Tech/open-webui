@@ -3,6 +3,9 @@ import logging
 from contextlib import contextmanager
 from typing import Any, Optional
 
+
+
+
 from open_webui.internal.wrappers import register_connection
 from open_webui.env import (
     OPEN_WEBUI_DIR,
@@ -48,31 +51,11 @@ class JSONField(types.TypeDecorator):
             return json.loads(value)
 
 
-# Workaround to handle the peewee migration
-# This is required to ensure the peewee migration is handled before the alembic migration
-def handle_peewee_migration(DATABASE_URL):
-    # db = None
-    try:
-        # Replace the postgresql:// with postgres:// to handle the peewee migration
-        db = register_connection(DATABASE_URL.replace("postgresql://", "postgres://"))
-        migrate_dir = OPEN_WEBUI_DIR / "internal" / "migrations"
-        router = Router(db, logger=log, migrate_dir=migrate_dir)
-        router.run()
-        db.close()
-
-    except Exception as e:
-        log.error(f"Failed to initialize the database connection: {e}")
-        raise
-    finally:
-        # Properly closing the database connection
-        if db and not db.is_closed():
-            db.close()
-
-        # Assert if db connection has been closed
-        assert db.is_closed(), "Database connection is still open."
-
-
-handle_peewee_migration(DATABASE_URL)
+# Initialize db globally
+db = register_connection(DATABASE_URL.replace("postgresql://", "postgres://"))
+migrate_dir = OPEN_WEBUI_DIR / "internal" / "migrations"
+router = Router(db, logger=log, migrate_dir=migrate_dir)
+router.run()
 
 
 SQLALCHEMY_DATABASE_URL = DATABASE_URL

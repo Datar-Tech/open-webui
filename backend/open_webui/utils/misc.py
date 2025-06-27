@@ -16,6 +16,11 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
+def has_access(user_id: str, type: str, access_control: dict) -> bool:
+    # Placeholder for actual access control logic
+    return True
+
+
 def deep_update(d, u):
     for k, v in u.items():
         if isinstance(v, collections.abc.Mapping):

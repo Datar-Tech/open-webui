@@ -1,6 +1,12 @@
+import sys
+import os
 from logging.config import fileConfig
 
 from alembic import context
+
+# Add the project root to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..')))
+
 from open_webui.models.auths import Auth
 from open_webui.env import DATABASE_URL
 from sqlalchemy import engine_from_config, pool

@@ -14,6 +14,8 @@
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
+	let currentAgentTaskId: string | null = null;
+
 	import {
 		chatId,
 		chats,
@@ -264,12 +266,15 @@
 					}
 				} else if (type === 'chat:completion') {
 					chatCompletionEventHandler(data, message, event.chat_id);
-				} else if (type === 'chat:message:delta' || type === 'message') {
+				} else if (type === 'chat:message:delta' || type === 'message' || type === 'text') {
 					message.content += data.content;
 				} else if (type === 'chat:message' || type === 'replace') {
 					message.content = data.content;
-				} else if (type === 'chat:message:files' || type === 'files') {
-					message.files = data.files;
+				} else if (type === 'error') {
+					message.error = { content: data.content };
+					message.done = true;
+								} else if (type === 'chat:message:files' || type === 'files') {
+					
 				} else if (type === 'chat:title') {
 					chatTitle.set(data);
 					currentChatPage.set(1);
@@ -1568,114 +1573,120 @@
 			.filter((message) => message?.role === 'user' || message?.content?.trim());
 
 		const res = await generateOpenAIChatCompletion(
-			localStorage.token,
-			{
-				stream: stream,
-				model: model.id,
-				messages: messages,
-				params: {
-					...$settings?.params,
-					...params,
+            localStorage.token,
+            {
+                stream: stream,
+                model: model.id,
+                messages: messages,
+                params: {
+                    ...$settings?.params,
+                    ...params,
 
-					format: $settings.requestFormat ?? undefined,
-					keep_alive: $settings.keepAlive ?? undefined,
-					stop:
-						(params?.stop ?? $settings?.params?.stop ?? undefined)
-							? (params?.stop.split(',').map((token) => token.trim()) ?? $settings.params.stop).map(
-									(str) => decodeURIComponent(JSON.parse('"' + str.replace(/\"/g, '\\"') + '"'))
-								)
-							: undefined
-				},
+                    format: $settings.requestFormat ?? undefined,
+                    keep_alive: $settings.keepAlive ?? undefined,
+                    stop:
+                        (params?.stop ?? $settings?.params?.stop ?? undefined)
+                            ? (params?.stop.split(',').map((token) => token.trim()) ?? $settings.params.stop).map(
+                                    (str) => decodeURIComponent(JSON.parse('"' + str.replace(/\"/g, '\\"') + '"'))
+                                )
+                            : undefined
+                },
 
-				files: (files?.length ?? 0) > 0 ? files : undefined,
-				tool_ids: selectedToolIds.length > 0 ? selectedToolIds : undefined,
-				tool_servers: $toolServers,
+                files: (files?.length ?? 0) > 0 ? files : undefined,
+                tool_ids: selectedToolIds.length > 0 ? selectedToolIds : undefined,
+                tool_servers: $toolServers,
 
-				features: {
-					image_generation:
-						$config?.features?.enable_image_generation &&
-						($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
-							? imageGenerationEnabled
-							: false,
-					code_interpreter:
-						$config?.features?.enable_code_interpreter &&
-						($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
-							? codeInterpreterEnabled
-							: false,
-					web_search:
-						$config?.features?.enable_web_search &&
-						($user?.role === 'admin' || $user?.permissions?.features?.web_search)
-							? webSearchEnabled || ($settings?.webSearch ?? false) === 'always'
-							: false
-				},
-				variables: {
-					...getPromptVariables(
-						$user?.name,
-						$settings?.userLocation
-							? await getAndUpdateUserLocation(localStorage.token).catch((err) => {
-									console.error(err);
-									return undefined;
-								})
-							: undefined
-					)
-				},
-				model_item: $models.find((m) => m.id === model.id),
+                features: {
+                    image_generation:
+                        $config?.features?.enable_image_generation &&
+                        ($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+                            ? imageGenerationEnabled
+                            : false,
+                    code_interpreter:
+                        $config?.features?.enable_code_interpreter &&
+                        ($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
+                            ? codeInterpreterEnabled
+                            : false,
+                    web_search:
+                        $config?.features?.enable_web_search &&
+                        ($user?.role === 'admin' || $user?.permissions?.features?.web_search)
+                            ? webSearchEnabled || ($settings?.webSearch ?? false) === 'always'
+                            : false
+                },
+                variables: {
+                    ...getPromptVariables(
+                        $user?.name,
+                        $settings?.userLocation
+                            ? await getAndUpdateUserLocation(localStorage.token).catch((err) => {
+                                    console.error(err);
+                                    return undefined;
+                                })
+                            : undefined
+                    )
+                },
+                model_item: $models.find((m) => m.id === model.id),
 
-				session_id: $socket?.id,
-				chat_id: $chatId,
-				id: responseMessageId,
+                session_id: $socket?.id,
+                chat_id: $chatId,
+                id: responseMessageId,
 
-				...(!$temporaryChatEnabled &&
-				(messages.length == 1 ||
-					(messages.length == 2 &&
-						messages.at(0)?.role === 'system' &&
-						messages.at(1)?.role === 'user')) &&
-				(selectedModels[0] === model.id || atSelectedModel !== undefined)
-					? {
-							background_tasks: {
-								title_generation: $settings?.title?.auto ?? true,
-								tags_generation: $settings?.autoTags ?? true
-							}
-						}
-					: {}),
+                ...(!$temporaryChatEnabled &&
+                (messages.length == 1 ||
+                    (messages.length == 2 &&
+                        messages.at(0)?.role === 'system' &&
+                        messages.at(1)?.role === 'user')) &&
+                (selectedModels[0] === model.id || atSelectedModel !== undefined)
+                    ? {
+                            background_tasks: {
+                                title_generation: $settings?.title?.auto ?? true,
+                                tags_generation: $settings?.autoTags ?? true
+                            }
+                        }
+                    : {}),
 
-				...(stream && (model.info?.meta?.capabilities?.usage ?? false)
-					? {
-							stream_options: {
-								include_usage: true
-							}
-						}
-					: {})
-			},
-			`${WEBUI_BASE_URL}/api`
-		).catch(async (error) => {
-			toast.error(`${error}`);
+                ...(stream && (model.info?.meta?.capabilities?.usage ?? false)
+                    ? {
+                            stream_options: {
+                                include_usage: true
+                            }
+                        }
+                    : {})
+            },
+            `${WEBUI_BASE_URL}/api`
+        ).catch(async (error) => {
+            toast.error(`${error}`);
 
-			responseMessage.error = {
-				content: error
-			};
-			responseMessage.done = true;
+            responseMessage.error = {
+                content: error
+            };
+            responseMessage.done = true;
 
-			history.messages[responseMessageId] = responseMessage;
-			history.currentId = responseMessageId;
-			return null;
-		});
+            history.messages[responseMessageId] = responseMessage;
+            history.currentId = responseMessageId;
+            return null;
+        });
 
-		if (res) {
-			if (res.error) {
-				await handleOpenAIError(res.error, responseMessage);
-			} else {
-				if (taskIds) {
-					taskIds.push(res.task_id);
-				} else {
-					taskIds = [res.task_id];
-				}
-			}
-		}
+        currentAgentTaskId = res.headers.get('X-Task-Id');
 
-		await tick();
-		scrollToBottom();
-	};
+        if (res) {
+            if (res.error) {
+                await handleOpenAIError(res.error, responseMessage);
+            } else {
+                if (taskIds) {
+                    taskIds.push(res.task_id);
+                } else {
+                    taskIds = [res.task_id];
+                }
+
+				currentAgentTaskId = res.headers.get('X-Task-Id');
+            }
+        }
+
+        currentAgentTaskId = null;
+
+        await tick();
+        scrollToBottom();
+    };
 
 	const handleOpenAIError = async (error, responseMessage) => {
 		let errorMessage = '';

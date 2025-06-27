@@ -28,6 +28,8 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 RUN npm ci
+RUN npm install svelte-fa
+RUN npm install @fortawesome/free-solid-svg-icons
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}

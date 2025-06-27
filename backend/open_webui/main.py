@@ -76,6 +76,7 @@ from open_webui.routers import (
     tools,
     users,
     utils,
+    agents,
 )
 
 from open_webui.routers.retrieval import (
@@ -377,6 +378,7 @@ from open_webui.tasks import (
     list_task_ids_by_chat_id,
     stop_task,
     list_tasks,
+    create_task,
 )  # Import from tasks.py
 
 from open_webui.utils.redis import get_sentinels_from_env
@@ -967,10 +969,12 @@ app.include_router(folders.router, prefix="/api/v1/folders", tags=["folders"])
 app.include_router(groups.router, prefix="/api/v1/groups", tags=["groups"])
 app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
 app.include_router(functions.router, prefix="/api/v1/functions", tags=["functions"])
+app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
 app.include_router(
     evaluations.router, prefix="/api/v1/evaluations", tags=["evaluations"]
 )
 app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
+
 
 
 try:
@@ -1078,6 +1082,34 @@ async def chat_completion(
     model_item = form_data.pop("model_item", {})
     tasks = form_data.pop("background_tasks", None)
 
+    # --- Agent Mode Logic ---
+    if model_item.get("agent", False):
+        agent_id = model_item["id"]
+        agent_obj = Agent.get_by_id(agent_id)
+        if not agent_obj:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        user_message = form_data.get("message", {}).get("content", "")
+        chat_history = form_data.get("messages", [])
+
+        # Create a task for the agent execution
+        task_id, agent_task = create_task(
+            handle_agent_chat_completion(
+                request, agent_obj, form_data, user_message, chat_history
+            ),
+            id=form_data.get("chat_id"), # Associate task with chat_id
+        )
+
+        # Return a StreamingResponse that consumes the agent_task
+        return StreamingResponse(
+            content=agent_task,
+            media_type="text/event-stream",
+            headers={
+                "X-Task-Id": task_id, # Send task_id to frontend
+            }
+        )
+    # --- End Agent Mode Logic ---
+
     metadata = {}
     try:
         if not model_item.get("direct", False):
@@ -1113,8 +1145,7 @@ async def chat_completion(
             "variables": form_data.get("variables", None),
             "model": model,
             "direct": model_item.get("direct", False),
-            **(
-                {"function_calling": "native"}
+            **({"function_calling": "native"}
                 if form_data.get("params", {}).get("function_calling") == "native"
                 or (
                     model_info

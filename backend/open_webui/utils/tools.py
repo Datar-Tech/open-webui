@@ -203,6 +203,49 @@ def get_tools(
     return tools_dict
 
 
+async def execute_tool_by_id(request: Request, tool_id: str, tool_name: str, **kwargs) -> Any:
+    """Executes a specific Open WebUI tool by its ID and function name."""
+    log.info(f"Attempting to execute tool: {tool_id}.{tool_name} with args: {kwargs}")
+
+    tool_instance = request.app.state.TOOLS.get(tool_id)
+    if not tool_instance:
+        # If not in cache, try to load it
+        try:
+            tool_instance, _ = load_tool_module_by_id(tool_id)
+            request.app.state.TOOLS[tool_id] = tool_instance
+        except Exception as e:
+            log.error(f"Failed to load tool module {tool_id}: {e}")
+            raise HTTPException(status_code=404, detail=f"Tool module {tool_id} not found or failed to load")
+
+    tool_callable = getattr(tool_instance, tool_name, None)
+    if not tool_callable:
+        log.error(f"Tool function {tool_name} not found in module {tool_id}")
+        raise HTTPException(status_code=404, detail=f"Tool function {tool_name} not found")
+
+    try:
+        # Apply extra parameters if needed (e.g., user, request object)
+        # This needs to be consistent with how get_tools applies extra_params
+        extra_params = {
+            "__id__": tool_id,
+            "__user__": request.state.user, # Assuming user is available in request.state
+            "__request__": request
+        }
+        
+        # Filter kwargs to only include parameters expected by the tool_callable
+        sig = inspect.signature(tool_callable)
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
+
+        # Apply extra_params to the callable if they are in its signature
+        final_callable = get_async_tool_function_and_apply_extra_params(tool_callable, extra_params)
+
+        result = await final_callable(**filtered_kwargs)
+        log.info(f"Tool {tool_id}.{tool_name} executed successfully.")
+        return result
+    except Exception as e:
+        log.error(f"Error executing tool {tool_id}.{tool_name}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error executing tool {tool_id}.{tool_name}: {str(e)}")
+
+
 def parse_description(docstring: str | None) -> str:
     """
     Parse a function's docstring to extract the description.

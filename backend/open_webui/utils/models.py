@@ -57,6 +57,19 @@ async def get_all_base_models(request: Request, user: UserModel = None):
     function_models = await get_function_models(request)
     models = function_models + openai_models + ollama_models
 
+    agents = Agent.get_all()
+    for agent_obj in agents:
+        models.append({
+            "id": agent_obj.id,
+            "name": agent_obj.name,
+            "object": "agent", # Indicate it's an agent
+            "created": agent_obj.created_at,
+            "owned_by": "agent",
+            "agent": True, # Custom flag for frontend
+            "agent_type": agent_obj.agent_type,
+            "info": agent_obj.to_dict(), # Full agent info
+        })
+
     return models
 
 
