@@ -11,6 +11,7 @@ from open_webui.functions import get_function_models
 
 from open_webui.models.functions import Functions
 from open_webui.models.models import Models
+from open_webui.models.agents import Agent
 
 
 from open_webui.utils.plugin import load_function_module_by_id
