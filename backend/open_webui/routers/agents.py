@@ -4,7 +4,9 @@ from open_webui.models.agents import Agent, AgentForm, AgentModel, AgentResponse
 from open_webui.models.users import Users
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.misc import has_access
-from open_webui.utils.log import log
+import logging
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
