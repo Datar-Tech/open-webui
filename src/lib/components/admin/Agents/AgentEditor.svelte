@@ -18,15 +18,15 @@
 
 	onMount(async () => {
 		if (agentId) {
-			agent = await getAgent(agentId);
+			agent = await getAgent(localStorage.token, agentId);
 		}
 	});
 
 	const handleSubmit = async () => {
 		if (agentId) {
-			await updateAgent(agentId, agent);
+			await updateAgent(localStorage.token, agentId, agent);
 		} else {
-			await createAgent(agent);
+			await createAgent(localStorage.token, agent);
 		}
 		goto(`${ADMIN_PATH}/agents`);
 	};
@@ -51,7 +51,7 @@
 		</select>
 	</div>
 
-	<div class_="mb-4">
+	<div class="mb-4">
 		<label for="definition" class="block text-sm font-medium">Definition</label>
 		{#if agent.agent_type === 'custom_python'}
 			<textarea id="definition" bind:value={agent.definition} class="textarea textarea-bordered w-full" rows="10"></textarea>

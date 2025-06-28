@@ -23,13 +23,19 @@ export const getAgents = async (token: string = '') => {
 	}
 };
 
-export const getAgent = async (id: string) => {
-	const response = await fetch(`${WEBUI_API_BASE_URL}/agents/id/${id}`);
+export const getAgent = async (token: string, id: string) => {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/agents/id/${id}`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		}
+	});
 	return await response.json();
 };
 
 export const createAgent = async (token: string, agent: any) => {
-	await fetch(`${WEBUI_API_BASE_URL}/agents/create`, {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/agents/create`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
@@ -37,11 +43,16 @@ export const createAgent = async (token: string, agent: any) => {
 		},
 		body: JSON.stringify(agent)
 	});
-	await getAgents(token);
+
+	if (response.ok) {
+		await getAgents(token);
+	}
+
+	return response;
 };
 
 export const updateAgent = async (token: string, id: string, agent: any) => {
-	await fetch(`${WEBUI_API_BASE_URL}/agents/id/${id}/update`, {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/agents/id/${id}/update`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json',
@@ -49,16 +60,26 @@ export const updateAgent = async (token: string, id: string, agent: any) => {
 		},
 		body: JSON.stringify(agent)
 	});
-	await getAgents(token);
+
+	if (response.ok) {
+		await getAgents(token);
+	}
+
+	return response;
 };
 
 export const deleteAgent = async (token: string, id: string) => {
-	await fetch(`${WEBUI_API_BASE_URL}/agents/id/${id}/delete`, {
+	const response = await fetch(`${WEBUI_API_BASE_URL}/agents/id/${id}/delete`, {
 		method: 'DELETE',
 		headers: {
 			'Content-Type': 'application/json',
 			...(token && { authorization: `Bearer ${token}` })
 		}
 	});
-	await getAgents(token);
+
+	if (response.ok) {
+		await getAgents(token);
+	}
+
+	return response;
 };

@@ -10,16 +10,20 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-@router.get("/", response_model=List[AgentUserResponse])
+@router.get("", response_model=List[AgentUserResponse])
 async def get_agents(request: Request, user=Depends(get_verified_user)):
     agents = []
     for agent_obj in Agent.get_all():
         user_obj = Users.get_user_by_id(agent_obj.user_id)
-        if agent_obj.user_id == user.id or has_access(user.id, "read", agent_obj.access_control):
-            agents.append(AgentUserResponse(
-                **AgentModel.model_validate(agent_obj).model_dump(),
-                user=user_obj.model_dump() if user_obj else None
-            ))
+        if agent_obj.user_id == user.id or has_access(
+            user.id, "read", agent_obj.access_control
+        ):
+            agents.append(
+                AgentUserResponse(
+                    **AgentModel.model_validate(agent_obj.__data__).model_dump(),
+                    user=user_obj.model_dump() if user_obj else None,
+                )
+            )
     return agents
 
 @router.post("/create", response_model=AgentResponse)
@@ -34,11 +38,11 @@ async def create_agent(request: Request, form_data: AgentForm, user=Depends(get_
         definition=form_data.definition,
         valves=form_data.valves,
         name=form_data.name,
-        meta=form_data.meta,
-        access_control=form_data.access_control
+        meta=form_data.meta.model_dump() if form_data.meta else None,
+        access_control=form_data.access_control,
     )
     agent_obj.save()
-    return AgentResponse.model_validate(agent_obj)
+    return AgentResponse.model_validate(agent_obj.__data__)
 
 @router.get("/id/{agent_id}", response_model=AgentModel)
 async def get_agent_by_id(request: Request, agent_id: str, user=Depends(get_verified_user)):
@@ -46,10 +50,12 @@ async def get_agent_by_id(request: Request, agent_id: str, user=Depends(get_veri
     if not agent_obj:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    if agent_obj.user_id != user.id and not has_access(user.id, "read", agent_obj.access_control):
+    if agent_obj.user_id != user.id and not has_access(
+        user.id, "read", agent_obj.access_control
+    ):
         raise HTTPException(status_code=403, detail="Not authorized to access this agent")
 
-    return AgentModel.model_validate(agent_obj)
+    return AgentModel.model_validate(agent_obj.__data__)
 
 @router.post("/id/{agent_id}/update", response_model=AgentResponse)
 async def update_agent(request: Request, agent_id: str, form_data: AgentForm, user=Depends(get_admin_user)):
@@ -64,10 +70,10 @@ async def update_agent(request: Request, agent_id: str, form_data: AgentForm, us
     agent_obj.definition = form_data.definition
     agent_obj.valves = form_data.valves
     agent_obj.name = form_data.name
-    agent_obj.meta = form_data.meta
+    agent_obj.meta = form_data.meta.model_dump() if form_data.meta else None
     agent_obj.access_control = form_data.access_control
     agent_obj.save()
-    return AgentResponse.model_validate(agent_obj)
+    return AgentResponse.model_validate(agent_obj.__data__)
 
 @router.delete("/id/{agent_id}/delete")
 async def delete_agent(request: Request, agent_id: str, user=Depends(get_admin_user)):
