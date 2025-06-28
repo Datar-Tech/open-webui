@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { ADMIN_PATH } from '$lib/constants';
@@ -8,12 +8,12 @@
 	import { faTrash, faEdit } from '@fortawesome/free-solid-svg-icons';
 
 	onMount(async () => {
-		await getAgents();
+		await getAgents(localStorage.token);
 	});
 
-	const handleDelete = async (agentId) => {
+	const handleDelete = async (agentId: string) => {
 		if (confirm('Are you sure you want to delete this agent?')) {
-			await deleteAgent(agentId);
+			await deleteAgent(localStorage.token, agentId);
 		}
 	};
 </script>
