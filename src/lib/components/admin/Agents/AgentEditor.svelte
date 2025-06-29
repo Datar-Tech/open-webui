@@ -1,10 +1,10 @@
-<script>
+<script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { ADMIN_PATH } from '$lib/constants';
 	import { createAgent, getAgent, updateAgent } from '$lib/apis/agents';
 
-	export let agentId = null;
+	export let agentId: string | null = null;
 
 	let agent = {
 		id: '',

@@ -78,7 +78,7 @@ export const deleteAgent = async (token: string, id: string) => {
 	});
 
 	if (response.ok) {
-		await getAgents(token);
+		agents.update((_agents) => _agents.filter((agent) => agent.id !== id));
 	}
 
 	return response;

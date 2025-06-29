@@ -17,8 +17,18 @@ log.setLevel(SRC_LOG_LEVELS["MAIN"])
 
 
 def has_access(user_id: str, type: str, access_control: dict) -> bool:
-    # Placeholder for actual access control logic
-    return True
+    if not access_control:
+        return False
+
+    # Public read access
+    if type == "read" and access_control.get("public", False):
+        return True
+
+    # User-specific access
+    if "users" in access_control and user_id in access_control.get("users", []):
+        return True
+
+    return False
 
 
 def deep_update(d, u):

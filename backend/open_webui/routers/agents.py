@@ -31,6 +31,9 @@ async def create_agent(request: Request, form_data: AgentForm, user=Depends(get_
     if Agent.get_by_id(form_data.id):
         raise HTTPException(status_code=400, detail="Agent with this ID already exists")
 
+    if not form_data.access_control:
+        form_data.access_control = {"users": [user.id]}
+
     agent_obj = Agent(
         id=form_data.id,
         user_id=user.id,
@@ -41,7 +44,15 @@ async def create_agent(request: Request, form_data: AgentForm, user=Depends(get_
         meta=form_data.meta.model_dump() if form_data.meta else None,
         access_control=form_data.access_control,
     )
-    agent_obj.save()
+    
+    log.info(f"Attempting to save agent: {agent_obj.id}")
+    try:
+        agent_obj.save(force_insert=True)
+        log.info(f"Agent {agent_obj.id} saved successfully.")
+    except Exception as e:
+        log.error(f"Failed to save agent {agent_obj.id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save agent to database.")
+
     return AgentResponse.model_validate(agent_obj.__data__)
 
 @router.get("/id/{agent_id}", response_model=AgentModel)
@@ -84,5 +95,5 @@ async def delete_agent(request: Request, agent_id: str, user=Depends(get_admin_u
     if agent_obj.user_id != user.id and not has_access(user.id, "write", agent_obj.access_control):
         raise HTTPException(status_code=403, detail="Not authorized to delete this agent")
 
-    agent_obj.delete()
+    agent_obj.delete_instance()
     return {"message": "Agent deleted successfully"}

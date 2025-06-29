@@ -49,6 +49,9 @@ class Agent(Model):
     def get_by_id(cls, id: str):
         return cls.get_or_none(cls.id == id)
 
+    def to_dict(self):
+        return self.__data__
+
     @classmethod
     def get_all(cls):
         return list(cls.select())
@@ -118,4 +121,3 @@ class AgentForm(BaseModel):
     name: Optional[str] = None
     meta: Optional[AgentMeta] = None
     access_control: Optional[dict] = None
-
