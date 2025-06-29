@@ -12,18 +12,19 @@
 	import { oneDark } from '@codemirror/theme-one-dark';
 
 	import { onMount, createEventDispatcher, getContext, tick } from 'svelte';
+	import type { Writable } from 'svelte/store';
 
 	import { formatPythonCode } from '$lib/apis/utils';
 	import { toast } from 'svelte-sonner';
 
 	const dispatch = createEventDispatcher();
-	const i18n = getContext('i18n');
+	const i18n = getContext<Writable<any>>('i18n');
 
 	export let boilerplate = '';
 	export let value = '';
 
 	export let onSave = () => {};
-	export let onChange = () => {};
+	export let onChange: (value: string) => void = () => {};
 
 	let _value = '';
 
@@ -45,8 +46,8 @@
 	/**
 	 * Finds multiple diffs in two strings and generates minimal change edits.
 	 */
-	function findChanges(oldStr, newStr) {
-		let changes = [];
+	function findChanges(oldStr: string, newStr: string) {
+		const changes = [];
 		let oldIndex = 0,
 			newIndex = 0;
 
@@ -79,7 +80,7 @@
 	export let id = '';
 	export let lang = '';
 
-	let codeEditor;
+	let codeEditor: EditorView;
 
 	export const focus = () => {
 		codeEditor.focus();
@@ -178,13 +179,16 @@
 		isDarkMode = document.documentElement.classList.contains('dark');
 
 		// python code editor, highlight python code
-		codeEditor = new EditorView({
-			state: EditorState.create({
-				doc: _value,
-				extensions: extensions
-			}),
-			parent: document.getElementById(`code-textarea-${id}`)
-		});
+		const parentEl = document.getElementById(`code-textarea-${id}`);
+		if (parentEl) {
+			codeEditor = new EditorView({
+				state: EditorState.create({
+					doc: _value,
+					extensions: extensions
+				}),
+				parent: parentEl
+			});
+		}
 
 		if (isDarkMode) {
 			codeEditor.dispatch({
@@ -206,7 +210,7 @@
 							});
 						} else {
 							codeEditor.dispatch({
-								effects: editorTheme.reconfigure()
+								effects: editorTheme.reconfigure([])
 							});
 						}
 					}
@@ -219,7 +223,7 @@
 			attributeFilter: ['class']
 		});
 
-		const keydownHandler = async (e) => {
+		const keydownHandler = async (e: KeyboardEvent) => {
 			if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 				e.preventDefault();
 

@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { ADMIN_PATH } from '$lib/constants';
 	import { createAgent, getAgent, updateAgent } from '$lib/apis/agents';
+	import CodeEditor from '$lib/components/common/CodeEditor.svelte';
 
 	export let agentId: string | null = null;
 
@@ -53,10 +54,15 @@
 
 	<div class="mb-4">
 		<label for="definition" class="block text-sm font-medium">Definition</label>
-		{#if agent.agent_type === 'custom_python'}
-			<textarea id="definition" bind:value={agent.definition} class="textarea textarea-bordered w-full" rows="10"></textarea>
-		{:else if agent.agent_type === 'llamaindex_workflow'}
-			<textarea id="definition" bind:value={agent.definition} class="textarea textarea-bordered w-full" rows="10"></textarea>
+		{#if agent.agent_type === 'custom_python' || agent.agent_type === 'llamaindex_workflow'}
+			<CodeEditor
+				lang="python"
+				value={agent.definition}
+				id="definition"
+				onChange={(e) => {
+					agent.definition = e;
+				}}
+			/>
 		{/if}
 	</div>
 
