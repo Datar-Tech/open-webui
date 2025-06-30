@@ -25,7 +25,7 @@ from typing import (
 from functools import update_wrapper, partial
 
 
-from fastapi import Request
+from fastapi import Request, HTTPException
 from pydantic import BaseModel, Field, create_model
 
 from langchain_core.utils.function_calling import (
@@ -215,12 +215,18 @@ async def execute_tool_by_id(request: Request, tool_id: str, tool_name: str, **k
             request.app.state.TOOLS[tool_id] = tool_instance
         except Exception as e:
             log.error(f"Failed to load tool module {tool_id}: {e}")
-            raise HTTPException(status_code=404, detail=f"Tool module {tool_id} not found or failed to load")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Toolkit not found: {tool_id}",
+            )
 
     tool_callable = getattr(tool_instance, tool_name, None)
     if not tool_callable:
         log.error(f"Tool function {tool_name} not found in module {tool_id}")
-        raise HTTPException(status_code=404, detail=f"Tool function {tool_name} not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Tool function '{tool_name}' not found in toolkit '{tool_id}'",
+        )
 
     try:
         # Apply extra parameters if needed (e.g., user, request object)
@@ -243,7 +249,10 @@ async def execute_tool_by_id(request: Request, tool_id: str, tool_name: str, **k
         return result
     except Exception as e:
         log.error(f"Error executing tool {tool_id}.{tool_name}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error executing tool {tool_id}.{tool_name}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error executing tool {tool_id}.{tool_name}: {str(e)}",
+        )
 
 
 def parse_description(docstring: str | None) -> str:

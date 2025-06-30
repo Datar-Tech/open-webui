@@ -1,8 +1,9 @@
 from typing import Any, Dict
-from open_webui.utils.log import log
+import logging
 from open_webui.models.agents import Agent
-from open_webui.utils.agent_executor import handle_agent_chat_completion
 from fastapi import Request
+
+log = logging.getLogger(__name__)
 
 class AgentTools:
     def __init__(self, request: Request):
@@ -10,6 +11,8 @@ class AgentTools:
 
     async def call_agent(self, agent_id: str, message: str) -> Any:
         """Calls another agent with a given message and returns its response."""
+        from open_webui.utils.agent_executor import handle_agent_chat_completion
+
         log.info(f"Agent calling another agent: {agent_id} with message: {message}")
         
         agent_obj = Agent.get_by_id(agent_id)
@@ -37,4 +40,3 @@ class AgentTools:
             full_response.append(chunk)
         
         return "".join(full_response)
-

@@ -1666,21 +1666,22 @@
             return null;
         });
 
-        currentAgentTaskId = res.headers.get('X-Task-Id');
+        if (!res) {
+			return;
+		}
 
-        if (res) {
-            if (res.error) {
-                await handleOpenAIError(res.error, responseMessage);
-            } else {
-                if (taskIds) {
-                    taskIds.push(res.task_id);
-                } else {
-                    taskIds = [res.task_id];
-                }
+		currentAgentTaskId = res.headers.get('X-Task-Id');
 
-				currentAgentTaskId = res.headers.get('X-Task-Id');
-            }
-        }
+		if (res.error) {
+			await handleOpenAIError(res.error, responseMessage);
+		} else {
+			if (taskIds) {
+				taskIds.push(res.task_id);
+			} else {
+				taskIds = [res.task_id];
+			}
+			currentAgentTaskId = res.headers.get('X-Task-Id');
+		}
 
         currentAgentTaskId = null;
 

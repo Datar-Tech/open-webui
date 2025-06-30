@@ -1,19 +1,22 @@
 from typing import List, Dict, Any, Callable, AsyncIterator
+import logging
 from fastapi import Request, HTTPException
 from open_webui.models.users import UserModel
-from open_webui.utils.log import log
 import httpx
 import json
 
+log = logging.getLogger(__name__)
+
 # Assuming llama_index is installed in the agent's environment
 try:
-    from llama_index.core.tools import FunctionTool, BaseTool
+    from llama_index.core.tools import FunctionTool, BaseTool, ToolOutput
     from llama_index.core.llms import ChatMessage, MessageRole, LLM
     from llama_index.core.response import Response as LlamaIndexResponse
 except ImportError:
     log.warning("LlamaIndex not found. OpenWebUIToolAdapter will not be able to create LlamaIndex tools.")
     FunctionTool = None
     BaseTool = None
+    ToolOutput = None
     LlamaIndexResponse = None
 
 # Import the new execute_tool_by_id function
@@ -50,24 +53,39 @@ class OpenWebUIToolAdapter:
                 log.error(f"Network error fetching tools from {tools_api_url}: {e}")
                 return []
 
-    async def _execute_openwebui_tool_proxy(self, tool_id: str, tool_name: str, **kwargs) -> Any:
+    async def _execute_openwebui_tool_proxy(
+        self, tool_id: str, tool_name: str, **kwargs
+    ) -> "ToolOutput":
         """Proxy function to execute an Open WebUI tool via execute_tool_by_id."""
-        log.info(f"Proxying execution for Open WebUI tool: {tool_name} (ID: {tool_id}) with args: {kwargs}")
+        log.info(
+            f"Proxying execution for Open WebUI tool: {tool_name} (ID: {tool_id}) with args: {kwargs}"
+        )
         try:
-            result = await execute_tool_by_id(self.request, tool_id, tool_name, **kwargs)
-            log.info(f"Tool {tool_name} execution proxied successfully. Result type: {type(result)}")
-            
+            result = await execute_tool_by_id(
+                self.request, tool_id, tool_name, **kwargs
+            )
+            log.info(
+                f"Tool {tool_name} execution proxied successfully. Result type: {type(result)}"
+            )
+
             # LlamaIndex tools expect a string output for observation
             # If the tool returns a complex object, convert it to string/JSON
             if isinstance(result, (dict, list)):
-                return json.dumps(result, indent=2)
-            return str(result)
+                content = json.dumps(result, indent=2)
+            else:
+                content = str(result)
+
+            return ToolOutput(content=content, raw_output=result)
         except HTTPException as e:
             log.error(f"HTTPException during tool proxy execution: {e.detail}")
-            return f"Error executing tool {tool_name}: {e.detail}"
+            error_content = f"Error executing tool {tool_name}: {e.detail}"
+            return {"error": error_content, "status_code": e.status_code}
         except Exception as e:
-            log.error(f"Unexpected error during tool proxy execution: {e}", exc_info=True)
-            return f"Error executing tool {tool_name}: {str(e)}"
+            log.error(
+                f"Unexpected error during tool proxy execution: {e}", exc_info=True
+            )
+            error_content = f"Error executing tool {tool_name}: {str(e)}"
+            return {"error": error_content}
 
     async def get_llamaindex_tools(self) -> List[BaseTool]:
         """Converts Open WebUI tools into LlamaIndex FunctionTool objects."""

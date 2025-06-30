@@ -1,12 +1,14 @@
 from typing import AsyncIterator, Dict, Any
+import logging
 from fastapi import Request
 from open_webui.models.agents import Agent as AgentModel
-from open_webui.utils.log import log
 from open_webui.utils.openwebui_tool_adapter import OpenWebUIToolAdapter
 from open_webui.utils.agent_tools import AgentTools
 import inspect
 import json
 import asyncio
+
+log = logging.getLogger(__name__)
 
 class AgentExecutor:
     def __init__(self, request: Request, agent_obj: AgentModel):
@@ -34,7 +36,7 @@ class AgentExecutor:
 
         except asyncio.CancelledError:
             log.info(f"Agent {self.agent_obj.name} execution cancelled.")
-            yield json.dumps({"type": "status", "content": "Agent execution cancelled."})
+            yield json.dumps({"type": "status", "content": "Agent execution cancelled."}) + "\n"
         except Exception as e:
             log.error(f"Error during agent execution: {e}", exc_info=True)
             yield json.dumps({"type": "error", "content": f"Agent execution failed: {str(e)}"}) + "\n"
@@ -46,14 +48,19 @@ class AgentExecutor:
         # and provide it with self.openwebui_tool_adapter and self.agent_tools
         
         # For now, just demonstrating the availability of these objects
-        yield json.dumps({"type": "text", "content": f"Custom Python agent received message: {user_message}\n"}) + "\n"
-        yield json.dumps({"type": "text", "content": f"Chat history: {chat_history}\n"}) + "\n"
+        yield json.dumps({"type": "text", "content": f"Custom Python agent received message: {user_message}"}) + "\n"
+        yield json.dumps({"type": "text", "content": f"Chat history: {chat_history}"}) + "\n"
         
         # Simulate tool call
         yield json.dumps({"type": "status", "content": "Custom Python agent calling a tool..."}) + "\n"
         try:
-            tool_result = await self.openwebui_tool_adapter._execute_openwebui_tool_proxy("dummy_tool_id", "dummy_tool_name", param1="value1")
-            yield json.dumps({"type": "text", "content": f"Tool result: {tool_result}\n"}) + "\n"
+            tool_output = await self.openwebui_tool_adapter._execute_openwebui_tool_proxy(
+                "dummy_tool_id", "dummy_tool_name", param1="value1"
+            )
+            if "error" in tool_output.raw_output:
+                yield json.dumps({"type": "error", "content": tool_output.content}) + "\n"
+            else:
+                yield json.dumps({"type": "text", "content": f"Tool result: {tool_output.content}"}) + "\n"
         except Exception as e:
             yield json.dumps({"type": "error", "content": f"Tool call failed: {str(e)}"}) + "\n"
 
@@ -66,14 +73,19 @@ class AgentExecutor:
         # and execute it, providing it with self.openwebui_tool_adapter and self.agent_tools
         
         # For now, just demonstrating the availability of these objects
-        yield json.dumps({"type": "text", "content": f"LlamaIndex workflow agent received message: {user_message}\n"}) + "\n"
-        yield json.dumps({"type": "text", "content": f"Chat history: {chat_history}\n"}) + "\n"
+        yield json.dumps({"type": "text", "content": f"LlamaIndex workflow agent received message: {user_message}"}) + "\n"
+        yield json.dumps({"type": "text", "content": f"Chat history: {chat_history}"}) + "\n"
 
         # Simulate tool call
         yield json.dumps({"type": "status", "content": "LlamaIndex workflow agent calling a tool..."}) + "\n"
         try:
-            tool_result = await self.openwebui_tool_adapter._execute_openwebui_tool_proxy("dummy_tool_id", "dummy_tool_name", param1="value1")
-            yield json.dumps({"type": "text", "content": f"Tool result: {tool_result}\n"}) + "\n"
+            tool_result = await self.openwebui_tool_adapter._execute_openwebui_tool_proxy(
+                "dummy_tool_id", "dummy_tool_name", {"param1": "value1"}
+            )
+            if "error" in tool_result.raw_output:
+                yield json.dumps({"type": "error", "content": tool_result.content}) + "\n"
+            else:
+                yield json.dumps({"type": "text", "content": f"Tool result: {tool_result.content}"}) + "\n"
         except Exception as e:
             yield json.dumps({"type": "error", "content": f"Tool call failed: {str(e)}"}) + "\n"
 

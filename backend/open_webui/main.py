@@ -36,13 +36,13 @@ from fastapi import (
 from fastapi.openapi.docs import get_swagger_ui_html
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import Response, StreamingResponse
+from starlette.responses import Response
 
 
 from open_webui.utils import logger
@@ -91,6 +91,7 @@ from open_webui.models.functions import Functions
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel, Users
 from open_webui.models.chats import Chats
+from open_webui.models.agents import Agent
 
 from open_webui.config import (
     LICENSE_KEY,
@@ -361,6 +362,7 @@ from open_webui.utils.chat import (
     chat_completed as chat_completed_handler,
     chat_action as chat_action_handler,
 )
+from open_webui.utils.agent_executor import handle_agent_chat_completion
 from open_webui.utils.middleware import process_chat_payload, process_chat_response
 from open_webui.utils.access_control import has_access
 
@@ -374,6 +376,7 @@ from open_webui.utils.auth import (
 from open_webui.utils.oauth import OAuthManager
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
 
+import uuid
 from open_webui.tasks import (
     list_task_ids_by_chat_id,
     stop_task,
@@ -1087,34 +1090,6 @@ async def chat_completion(
     model_item = form_data.pop("model_item", {})
     tasks = form_data.pop("background_tasks", None)
 
-    # --- Agent Mode Logic ---
-    if model_item.get("agent", False):
-        agent_id = model_item["id"]
-        agent_obj = Agent.get_by_id(agent_id)
-        if not agent_obj:
-            raise HTTPException(status_code=404, detail="Agent not found")
-
-        user_message = form_data.get("message", {}).get("content", "")
-        chat_history = form_data.get("messages", [])
-
-        # Create a task for the agent execution
-        task_id, agent_task = create_task(
-            handle_agent_chat_completion(
-                request, agent_obj, form_data, user_message, chat_history
-            ),
-            id=form_data.get("chat_id"), # Associate task with chat_id
-        )
-
-        # Return a StreamingResponse that consumes the agent_task
-        return StreamingResponse(
-            content=agent_task,
-            media_type="text/event-stream",
-            headers={
-                "X-Task-Id": task_id, # Send task_id to frontend
-            }
-        )
-    # --- End Agent Mode Logic ---
-
     metadata = {}
     try:
         if not model_item.get("direct", False):
@@ -1185,17 +1160,50 @@ async def chat_completion(
             detail=str(e),
         )
 
-    try:
-        response = await chat_completion_handler(request, form_data, user)
+    if model_item.get("agent", False):
+        # --- Agent Mode Logic ---
+        agent_id = model_item["id"]
+        agent_obj = Agent.get_by_id(agent_id)
+        if not agent_obj:
+            raise HTTPException(status_code=404, detail="Agent not found")
 
-        return await process_chat_response(
-            request, response, form_data, user, metadata, model, events, tasks
+        user_message = form_data.get("messages", [{}])[-1].get("content", "")
+        chat_history = form_data.get("messages", [])
+
+        request.state.user = user
+        request.state.metadata = metadata
+
+        # The agent handler is an async generator, which is directly consumable by StreamingResponse
+        agent_task_generator = handle_agent_chat_completion(
+            request, agent_obj, form_data, user_message, chat_history
         )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
+
+        # Although we are not using the full task management system here to avoid the TypeError,
+        # we still need a unique ID for the frontend to track the agent's execution.
+        task_id = str(uuid.uuid4())
+
+        return StreamingResponse(
+            content=agent_task_generator,
+            media_type="text/event-stream",
+            headers={
+                "X-Task-Id": task_id,
+            },
         )
+    else:
+        # --- Regular Model Logic ---
+        try:
+            response = await chat_completion_handler(request, form_data, user)
+
+            return await process_chat_response(
+                request, response, form_data, user, metadata, model, events, tasks
+            )
+        except HTTPException as e:
+            raise e
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
 
 
 # Alias for chat_completion (Legacy)
