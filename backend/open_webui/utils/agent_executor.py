@@ -10,7 +10,8 @@ import tempfile
 import os
 
 from typing import AsyncIterator, Dict, Any, Generator, Iterator, AsyncGenerator
-from fastapi import Request, HTTPException, StreamingResponse
+from fastapi import Request, HTTPException
+from starlette.responses import StreamingResponse
 from pydantic import BaseModel
 
 from open_webui.models.agents import Agent as AgentModel, Agent # 確保引入 Agent 類本身
