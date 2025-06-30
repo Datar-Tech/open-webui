@@ -9,7 +9,7 @@ import textwrap
 import tempfile
 import os
 
-from typing import AsyncIterator, Dict, Any, Generator, Iterator
+from typing import AsyncIterator, Dict, Any, Generator, Iterator, AsyncGenerator
 from fastapi import Request, HTTPException, StreamingResponse
 from pydantic import BaseModel
 
