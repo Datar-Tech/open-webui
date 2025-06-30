@@ -10,6 +10,7 @@ import logging
 from open_webui.env import SRC_LOG_LEVELS, PIP_OPTIONS, PIP_PACKAGE_INDEX_OPTIONS
 from open_webui.models.functions import Functions
 from open_webui.models.tools import Tools
+from open_webui.models.agents import Agent # 引入 Agent 模型
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MAIN"])
@@ -160,6 +161,55 @@ def load_function_module_by_id(function_id, content=None):
         del sys.modules[module_name]  # Cleanup by removing the module in case of error
 
         Functions.update_function_by_id(function_id, {"is_active": False})
+        raise e
+    finally:
+        os.unlink(temp_file.name)
+
+
+def load_agent_module_by_id(agent_id, content=None):
+    """
+    Loads an agent module by its ID, similar to load_function_module_by_id.
+    """
+    if content is None:
+        agent = Agent.get_by_id(agent_id) # 從 Agent 模型獲取
+        if not agent:
+            raise Exception(f"Agent not found: {agent_id}")
+        content = agent.definition # 代理的定義就是程式碼
+
+        content = replace_imports(content)
+        # Agent 模型沒有 content 欄位，所以不需要 update_agent_by_id
+    else:
+        frontmatter = extract_frontmatter(content)
+        install_frontmatter_requirements(frontmatter.get("requirements", ""))
+
+    module_name = f"agent_module_{agent_id.replace('-', '_')}" # 確保模組名合法
+    module = types.ModuleType(module_name)
+    sys.modules[module_name] = module
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".py")
+    temp_file.close()
+    try:
+        with open(temp_file.name, "w", encoding="utf-8") as f:
+            f.write(content)
+        module.__dict__["__file__"] = temp_file.name
+
+        exec(content, module.__dict__)
+        frontmatter = extract_frontmatter(content)
+        log.info(f"Loaded agent module: {module.__name__}")
+
+        # 複製 functions.py 中獲取 Pipe/Filter/Action 實例的邏輯
+        if hasattr(module, "Pipe"):
+            return module.Pipe(), "pipe", frontmatter
+        elif hasattr(module, "Filter"):
+            return module.Filter(), "filter", frontmatter
+        elif hasattr(module, "Action"):
+            return module.Action(), "action", frontmatter
+        else:
+            raise Exception("No Pipe, Filter, or Action class found in the agent module")
+    except Exception as e:
+        log.error(f"Error loading agent module: {agent_id}: {e}")
+        del sys.modules[module_name]
+        # Agent 模型沒有 is_active 欄位，所以不需要 update_agent_by_id
         raise e
     finally:
         os.unlink(temp_file.name)

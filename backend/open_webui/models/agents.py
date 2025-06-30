@@ -56,6 +56,55 @@ class Agent(Model):
     def get_all(cls):
         return list(cls.select())
 
+    @classmethod
+    def get_user_valves_by_id_and_user_id(cls, agent_id: str, user_id: str) -> Optional[dict]:
+        """
+        Retrieves user-specific valves for a given agent from user settings.
+        Mimics FunctionsTable.get_user_valves_by_id_and_user_id.
+        """
+        try:
+            user = Users.get_user_by_id(user_id)
+            user_settings = user.settings.model_dump() if user.settings else {}
+
+            # Check if user has "agents" and "valves" settings
+            if "agents" not in user_settings:
+                user_settings["agents"] = {}
+            if "valves" not in user_settings["agents"]:
+                user_settings["agents"]["valves"] = {}
+
+            return user_settings["agents"]["valves"].get(agent_id, {})
+        except Exception as e:
+            # log.exception( # 這裡不應該有 log.exception，因為 FunctionsTable 中也沒有
+            #     f"Error getting user agent valves by id {agent_id} and user id {user_id}: {e}"
+            # )
+            return None # 返回 None 或空字典，根據 Functions 的行為
+
+    @classmethod
+    def update_user_valves_by_id_and_user_id(cls, agent_id: str, user_id: str, valves: dict) -> Optional[dict]:
+        """
+        Updates user-specific valves for a given agent in user settings.
+        Mimics FunctionsTable.update_user_valves_by_id_and_user_id.
+        """
+        try:
+            user = Users.get_user_by_id(user_id)
+            user_settings = user.settings.model_dump() if user.settings else {}
+
+            if "agents" not in user_settings:
+                user_settings["agents"] = {}
+            if "valves" not in user_settings["agents"]:
+                user_settings["agents"]["valves"] = {}
+
+            user_settings["agents"]["valves"][agent_id] = valves
+
+            Users.update_user_by_id(user_id, {"settings": user_settings})
+
+            return user_settings["agents"]["valves"][agent_id]
+        except Exception as e:
+            # log.exception( # 這裡不應該有 log.exception，因為 FunctionsTable 中也沒有
+            #     f"Error updating user agent valves by id {agent_id} and user_id {user_id}: {e}"
+            # )
+            return None
+
 
 # Pydantic Models for API
 class AgentMeta(BaseModel):

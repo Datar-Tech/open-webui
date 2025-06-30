@@ -1,0 +1,65 @@
+{
+  "name": "LlamaIndex Search Agent",
+  "description": "An example agent that uses LlamaIndex to search for information and answer questions.",
+  "workflow": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "start",
+        "config": {
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "description": "The user's query."
+              }
+            },
+            "required": ["query"]
+          }
+        }
+      },
+      {
+        "id": "search_tool",
+        "type": "tool",
+        "config": {
+          "tool_name": "search",
+          "input_map": {
+            "query": "start.query"
+          }
+        }
+      },
+      {
+        "id": "llm_step",
+        "type": "llm",
+        "config": {
+          "prompt_template": "Based on the following search result, please answer the user's query.\n\nSearch Result:\n{search_tool.output}\n\nUser Query: {start.query}\n\nAnswer:",
+          "model": "ollama/llama2"
+        }
+      },
+      {
+        "id": "end",
+        "type": "end",
+        "config": {
+          "output_map": {
+            "answer": "llm_step.output"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "start",
+        "to": "search_tool"
+      },
+      {
+        "from": "search_tool",
+        "to": "llm_step"
+      },
+      {
+        "from": "llm_step",
+        "to": "end"
+      }
+    ]
+  }
+}
