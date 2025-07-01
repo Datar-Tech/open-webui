@@ -50,10 +50,10 @@ class AgentExecutor:
             yield json.dumps({"type": "status", "content": "Agent started..."}) + "\n"
 
             if self.agent_obj.agent_type == "custom_python":
-                async for chunk in self._execute_custom_python_agent(user_message, chat_history):
+                async for chunk in self._execute_custom_python_agent(user_message, chat_history, form_data):
                     yield chunk
             elif self.agent_obj.agent_type == "llamaindex_workflow":
-                async for chunk in self._execute_llamaindex_workflow_agent(user_message, chat_history):
+                async for chunk in self._execute_llamaindex_workflow_agent(user_message, chat_history, form_data):
                     yield chunk
             else:
                 yield json.dumps({"type": "error", "content": f"Unsupported agent type: {self.agent_obj.agent_type}"}) + "\n"
