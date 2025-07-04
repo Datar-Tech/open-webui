@@ -37,11 +37,11 @@ class Pipe:
                 search_tool = tools["search"]["callable"]
                 search_result = await search_tool(query=f"information about {user_message}")
                 print(f"Search result: {search_result}")
-                yield f"I found this information using the search tool: {search_result}"
+                return f"I found this information using the search tool: {search_result}"
             except Exception as e:
                 print(f"Error calling search tool: {e}")
-                yield f"Sorry, I couldn't use the search tool. Error: {e}"
+                return f"Sorry, I couldn't use the search tool. Error: {e}"
         else:
-            yield f"I received your message: '{user_message}', but I don't have a 'search' tool to help you."
+            return f"I received your message: '{user_message}', but I don't have a 'search' tool to help you."
 
         print("Custom Python agent finished.")
