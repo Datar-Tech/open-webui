@@ -94,10 +94,14 @@
 
 	// Clear selectedKnowledgeSources when available sources change (e.g., model switch)
 	// Keep only selections that are still valid in the new knowledgeSources list
-	$: if (knowledgeSources !== undefined) {
-		selectedKnowledgeSources = selectedKnowledgeSources.filter(
+	$: if (knowledgeSources !== undefined && selectedKnowledgeSources.length > 0) {
+		const validSources = selectedKnowledgeSources.filter(
 			(source) => knowledgeSources.includes(source)
 		);
+		// Only update when the result is actually different, to avoid infinite reactive loop
+		if (validSources.length !== selectedKnowledgeSources.length) {
+			selectedKnowledgeSources = validSources;
+		}
 	}
 
 	let correctionHintActive = false;
