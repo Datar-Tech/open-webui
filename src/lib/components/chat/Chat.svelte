@@ -50,7 +50,8 @@
 		removeDetails,
 		removeAllDetails,
 		getPromptVariables,
-		processDetails
+		processDetails,
+		extractRecommendationActions
 	} from '$lib/utils';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
@@ -126,6 +127,8 @@ let codeInterpreterEnabled = false;
 let selectedKnowledgeSources = [];
 
 	let showSearchPlanButtons = false;
+	let showRecommendationButtons = false;
+	let recommendationActions = [];
 
 	let chat = null;
 	let tags = [];
@@ -420,6 +423,7 @@ selectedKnowledgeSources = input.selectedKnowledgeSources;
 		$socket?.on('chat-events', chatEventHandler);
 		window.addEventListener('searchPlanButtonClicked', searchPlanButtonClickHandler);
 		window.addEventListener('beforeunload', handleBeforeUnload);
+		window.addEventListener('recommendationButtonClicked', recommendationButtonClickHandler);
 
 		if (!$chatId) {
 			chatIdUnsubscriber = chatId.subscribe(async (value) => {
@@ -487,10 +491,15 @@ selectedKnowledgeSources = [];
 		$socket?.off('chat-events', chatEventHandler);
 		window.removeEventListener('searchPlanButtonClicked', searchPlanButtonClickHandler);
 		window.removeEventListener('beforeunload', handleBeforeUnload);
+		window.removeEventListener('recommendationButtonClicked', recommendationButtonClickHandler);
 	});
 
 	const searchPlanButtonClickHandler = () => {
 		showSearchPlanButtons = false;
+	};
+
+	const recommendationButtonClickHandler = () => {
+		showRecommendationButtons = false;
 	};
 
 	const checkShowSearchPlanButtons = () => {
@@ -506,6 +515,27 @@ selectedKnowledgeSources = [];
 			showSearchPlanButtons = true;
 		} else {
 			showSearchPlanButtons = false;
+		}
+	};
+
+	const checkShowRecommendationButtons = () => {
+		if (
+			history.currentId &&
+			history.messages[history.currentId] &&
+			history.messages[history.currentId].role === 'assistant' &&
+			history.messages[history.currentId].done
+		) {
+			const actions = extractRecommendationActions(history.messages[history.currentId].content);
+			if (actions.length > 0) {
+				recommendationActions = actions;
+				showRecommendationButtons = true;
+			} else {
+				recommendationActions = [];
+				showRecommendationButtons = false;
+			}
+		} else {
+			recommendationActions = [];
+			showRecommendationButtons = false;
 		}
 	};
 
@@ -904,6 +934,7 @@ selectedKnowledgeSources = [];
 
 				await tick();
 				checkShowSearchPlanButtons();
+				checkShowRecommendationButtons();
 
 				return true;
 			} else {
@@ -976,6 +1007,7 @@ selectedKnowledgeSources = [];
 
 		taskIds = null;
 		checkShowSearchPlanButtons();
+		checkShowRecommendationButtons();
 	};
 
 	const chatActionHandler = async (chatId, actionId, modelId, responseMessageId, event = null) => {
@@ -2086,6 +2118,8 @@ $models.map((m) => m.id).includes(modelId) ? modelId : ''
 									{selectedModels}
 									{atSelectedModel}
 									{showSearchPlanButtons}
+									{showRecommendationButtons}
+									{recommendationActions}
 									{sendPrompt}
 									{showMessage}
 									{submitMessage}

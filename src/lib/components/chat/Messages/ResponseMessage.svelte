@@ -133,6 +133,8 @@
 	export let isLastMessage = true;
 	export let readOnly = false;
 	export let showSearchPlanButtons = false;
+	export let showRecommendationButtons = false;
+	export let recommendationActions = [];
 
 	let buttonsContainerElement: HTMLDivElement;
 	let showDeleteConfirm = false;
@@ -889,6 +891,23 @@
 								}}
 							>
 								{$i18n.t(button.Name)}
+							</button>
+						{/each}
+					</div>
+				{/if}
+
+				{#if showRecommendationButtons && isLastMessage && recommendationActions.length > 0}
+					<div class="mt-2 mb-1 flex flex-col items-start gap-1.5 text-sm font-medium">
+						{#each recommendationActions as action}
+							<button
+								class="px-4 py-2 bg-white dark:bg-gray-900 hover:bg-gray-100 text-gray-800 dark:text-gray-100 transition rounded-xl border border-gray-200 dark:border-gray-700 text-left"
+								title={action.reason ?? ''}
+								on:click={() => {
+									submitMessage(message.id, action.query);
+									window.dispatchEvent(new CustomEvent('recommendationButtonClicked'));
+								}}
+							>
+								Option {action.optionNumber}: {action.query}
 							</button>
 						{/each}
 					</div>

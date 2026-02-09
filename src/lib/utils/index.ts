@@ -26,6 +26,36 @@ import hljs from 'highlight.js';
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export type RecommendationAction = {
+	optionNumber: number;
+	query: string;
+	reason?: string;
+};
+
+export const extractRecommendationActions = (content: string): RecommendationAction[] => {
+	if (!content || !content.includes('Recommended Actions:')) {
+		return [];
+	}
+
+	if (content.includes('All aspects of your question have been addressed')) {
+		return [];
+	}
+
+	const pattern = /\*Option (\d+)\*:\s*`([^`]+)`(?:\s*_Reason:\s*([^_]+)_)?/g;
+	const actions: RecommendationAction[] = [];
+	let match;
+
+	while ((match = pattern.exec(content)) !== null) {
+		actions.push({
+			optionNumber: parseInt(match[1], 10),
+			query: match[2],
+			reason: match[3]?.trim() || undefined
+		});
+	}
+
+	return actions;
+};
+
 function escapeRegExp(string: string): string {
 	return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

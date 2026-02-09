@@ -40,6 +40,8 @@
 	export let triggerScroll;
 	export let readOnly = false;
 	export let showSearchPlanButtons = false;
+	export let showRecommendationButtons = false;
+	export let recommendationActions = [];
 </script>
 
 <div
@@ -88,6 +90,8 @@
 				{addMessages}
 				{readOnly}
 				{showSearchPlanButtons}
+				{showRecommendationButtons}
+				{recommendationActions}
 			/>
 		{:else}
 			<MultiResponseMessages
