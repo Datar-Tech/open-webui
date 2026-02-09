@@ -49,6 +49,8 @@
 	export let readOnly = false;
 
 	export let showSearchPlanButtons = false;
+	export let showRecommendationButtons = false;
+	export let recommendationActions = [];
 	export let bottomPadding = false;
 	export let autoScroll;
 
@@ -454,6 +456,8 @@
 							{triggerScroll}
 							{readOnly}
 							{showSearchPlanButtons}
+							{showRecommendationButtons}
+							{recommendationActions}
 						/>
 					{/each}
 				</div>
