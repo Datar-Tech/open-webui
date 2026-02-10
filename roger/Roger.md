@@ -73,18 +73,18 @@ $env:WEBUI_DEBUG=1 ; python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -
 
 ## Docker Build
 
-Modify package.json Line #2 for "version": "1.3.18"
+Modify package.json Line #2 for "version": "1.3.19"
 
 
 - docker login
-- change package.json line #2:	"version": "1.3.18",
-- docker build --build-arg BUILD_HASH=v1.3.18 -t tech-sense .
-- docker tag tech-sense deliah/tech-sense:v1.3.18
-- docker push deliah/tech-sense:v1.3.18
+- change package.json line #2:	"version": "1.3.19",
+- docker build --build-arg BUILD_HASH=v1.3.19 -t tech-sense .
+- docker tag tech-sense deliah/tech-sense:v1.3.19
+- docker push deliah/tech-sense:v1.3.19
 - docker tag tech-sense deliah/tech-sense:latest
 - docker push deliah/tech-sense:latest
 
-git tag -a v1.3.18 -m "Release v1.3.18"
-git push origin v1.3.18
-git push origin --delete v1.3.18
+git tag -a v1.3.19 -m "Release v1.3.19"
+git push origin v1.3.19
+git push origin --delete v1.3.19
 
