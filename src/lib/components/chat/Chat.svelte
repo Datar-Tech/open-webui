@@ -1855,6 +1855,7 @@ $models.map((m) => m.id).includes(modelId) ? modelId : ''
 	};
 
 	const submitMessage = async (parentId, prompt) => {
+		showRecommendationButtons = false;
 		let userPrompt = prompt;
 		let userMessageId = uuidv4();
 
