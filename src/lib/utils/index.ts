@@ -41,7 +41,7 @@ export const extractRecommendationActions = (content: string): RecommendationAct
 		return [];
 	}
 
-	const pattern = /\*Option (\d+)\*:\s*`([^`]+)`(?:\s*_Reason:\s*([^_]+)_)?/g;
+	const pattern = /\*{0,2}Option (\d+)\*{0,2}:\s*`?([^`\n]+)`?(?:\s*_?Reason:\s*([^_\n]+)_?)?/g;
 	const actions: RecommendationAction[] = [];
 	let match;
 
