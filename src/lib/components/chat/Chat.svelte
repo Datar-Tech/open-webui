@@ -1855,6 +1855,7 @@ $models.map((m) => m.id).includes(modelId) ? modelId : ''
 	};
 
 	const submitMessage = async (parentId, prompt) => {
+		showRecommendationButtons = false;
 		let userPrompt = prompt;
 		let userMessageId = uuidv4();
 
@@ -1888,6 +1889,7 @@ $models.map((m) => m.id).includes(modelId) ? modelId : ''
 
 	const regenerateResponse = async (message) => {
 		console.log('regenerateResponse');
+		showRecommendationButtons = false;
 
 		if (history.currentId) {
 			let userMessage = history.messages[message.parentId];
@@ -1913,6 +1915,7 @@ $models.map((m) => m.id).includes(modelId) ? modelId : ''
 
 	const continueResponse = async () => {
 		console.log('continueResponse');
+		showRecommendationButtons = false;
 		const _chatId = JSON.parse(JSON.stringify($chatId));
 
 		if (history.currentId && history.messages[history.currentId].done == true) {
