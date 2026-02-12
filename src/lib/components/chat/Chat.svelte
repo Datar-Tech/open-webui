@@ -1345,6 +1345,7 @@ selectedKnowledgeSources = [];
 	//////////////////////////
 
 const submitPrompt = async (userPrompt, { _raw = false } = {}) => {
+showRecommendationButtons = false;
 console.log('submitPrompt', userPrompt, $chatId);
 
 const messages = createMessagesList(history, history.currentId);
