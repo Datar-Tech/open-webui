@@ -26,6 +26,7 @@ from open_webui.config import (
     OAUTH_PROVIDERS,
     ENABLE_OAUTH_ROLE_MANAGEMENT,
     ENABLE_OAUTH_GROUP_MANAGEMENT,
+    ENABLE_OAUTH_NTID_FROM_GRAPH,
     OAUTH_ROLES_CLAIM,
     OAUTH_GROUPS_CLAIM,
     OAUTH_EMAIL_CLAIM,
@@ -60,6 +61,7 @@ auth_manager_config.ENABLE_OAUTH_SIGNUP = ENABLE_OAUTH_SIGNUP
 auth_manager_config.OAUTH_MERGE_ACCOUNTS_BY_EMAIL = OAUTH_MERGE_ACCOUNTS_BY_EMAIL
 auth_manager_config.ENABLE_OAUTH_ROLE_MANAGEMENT = ENABLE_OAUTH_ROLE_MANAGEMENT
 auth_manager_config.ENABLE_OAUTH_GROUP_MANAGEMENT = ENABLE_OAUTH_GROUP_MANAGEMENT
+auth_manager_config.ENABLE_OAUTH_NTID_FROM_GRAPH = ENABLE_OAUTH_NTID_FROM_GRAPH
 auth_manager_config.OAUTH_ROLES_CLAIM = OAUTH_ROLES_CLAIM
 auth_manager_config.OAUTH_GROUPS_CLAIM = OAUTH_GROUPS_CLAIM
 auth_manager_config.OAUTH_EMAIL_CLAIM = OAUTH_EMAIL_CLAIM
@@ -251,6 +253,62 @@ class OAuthManager:
             log.warning(f"OAuth callback failed, sub is missing: {user_data}")
             raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
         provider_sub = f"{provider}@{sub}"
+
+        # Fetch AMD NTID from Microsoft Graph (requires User.Read scope on the
+        # OIDC client). Two-stage gating:
+        #   1. Env opt-in (ENABLE_OAUTH_NTID_FROM_GRAPH) — primary kill switch.
+        #   2. Issuer check — even with the env on, only call Graph when the
+        #      ID token was actually signed by Microsoft Entra. Without this,
+        #      a misconfigured generic OIDC provider (Keycloak/Okta/Auth0)
+        #      would leak its access_token to graph.microsoft.com and add up
+        #      to 5s timeout latency to every login.
+        #
+        # `ntid_fetched` distinguishes "Graph returned 200" (write-through,
+        # may purge stale value) from "Graph failed / wasn't called" (skip).
+        ntid = ""
+        ntid_fetched = False
+        if (
+            auth_manager_config.ENABLE_OAUTH_NTID_FROM_GRAPH
+            and provider == "oidc"
+        ):
+            iss = ""
+            if isinstance(user_data, dict):
+                iss = (user_data.get("iss") or "").lower()
+            is_microsoft_idp = (
+                "login.microsoftonline.com" in iss
+                or "sts.windows.net" in iss
+            )
+            access_token_for_graph = token.get("access_token")
+            if not is_microsoft_idp:
+                log.debug(
+                    f"[NTID] skipping Graph fetch: iss={iss!r} is not Microsoft Entra"
+                )
+            elif access_token_for_graph:
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            "https://graph.microsoft.com/v1.0/me?$select=onPremisesSamAccountName",
+                            headers={"Authorization": f"Bearer {access_token_for_graph}"},
+                            timeout=aiohttp.ClientTimeout(total=5),
+                        ) as resp:
+                            if resp.ok:
+                                graph_data = await resp.json()
+                                ntid_fetched = True
+                                ntid = (graph_data.get("onPremisesSamAccountName") or "").strip()
+                                if ntid:
+                                    log.info(f"[NTID] fetched for {sub[:8]}...: {ntid}")
+                                else:
+                                    log.info(
+                                        f"[NTID] Graph returned null onPremisesSamAccountName "
+                                        f"for sub={sub[:8]}... (will purge any stale value)"
+                                    )
+                            else:
+                                body = await resp.text()
+                                log.warning(
+                                    f"[NTID] Graph call failed status={resp.status} body={body[:200]}"
+                                )
+                except Exception as e:
+                    log.warning(f"[NTID] Graph fetch exception: {e}")
         email_claim = auth_manager_config.OAUTH_EMAIL_CLAIM
         email = user_data.get(email_claim, "")
         # We currently mandate that email addresses are provided
@@ -317,6 +375,19 @@ class OAuthManager:
             determined_role = self.get_user_role(user, user_data)
             if user.role != determined_role:
                 Users.update_user_role_by_id(user.id, determined_role)
+
+            # Refresh NTID on every successful Graph fetch so AD changes
+            # (rename, contractor → FTE, account removal) propagate without
+            # manual fix. Gate on `ntid_fetched` (not the value), so:
+            #   - Graph 200 with a value      -> write the value
+            #   - Graph 200 with null/empty   -> purge stale DB value
+            #   - Graph failed / wasn't called -> leave existing value alone
+            if ntid_fetched and user.ntid != ntid:
+                Users.update_user_by_id(user.id, {"ntid": ntid or None})
+                log.info(
+                    f"[NTID] refreshed for user {user.id} ({user.email}): "
+                    f"{user.ntid!r} -> {ntid or None!r}"
+                )
 
         if not user:
             user_count = Users.get_num_users()
@@ -388,7 +459,13 @@ class OAuthManager:
                     profile_image_url=picture_url,
                     role=role,
                     oauth_sub=provider_sub,
+                    ntid=(ntid or None) if ntid_fetched else None,
                 )
+                if user and ntid_fetched:
+                    log.info(
+                        f"[NTID] set on new user {user.id} ({user.email}): "
+                        f"{ntid or None!r}"
+                    )
 
                 if auth_manager_config.WEBHOOK_URL:
                     post_webhook(

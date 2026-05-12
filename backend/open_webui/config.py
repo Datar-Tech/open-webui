@@ -514,6 +514,18 @@ ENABLE_OAUTH_GROUP_MANAGEMENT = PersistentConfig(
     os.environ.get("ENABLE_OAUTH_GROUP_MANAGEMENT", "False").lower() == "true",
 )
 
+# Microsoft-specific: fetch the user's on-prem AD NTID via Graph
+# (`onPremisesSamAccountName`) after OIDC login and persist it on the user row.
+# Off by default — enabling this sends the OIDC access_token to graph.microsoft.com,
+# which is only safe when the IdP IS Microsoft Entra. The runtime additionally
+# validates the `iss` claim points to login.microsoftonline.com / sts.windows.net
+# before issuing the call, but the env var is the primary opt-in gate.
+ENABLE_OAUTH_NTID_FROM_GRAPH = PersistentConfig(
+    "ENABLE_OAUTH_NTID_FROM_GRAPH",
+    "oauth.enable_ntid_from_graph",
+    os.environ.get("ENABLE_OAUTH_NTID_FROM_GRAPH", "False").lower() == "true",
+)
+
 OAUTH_ROLES_CLAIM = PersistentConfig(
     "OAUTH_ROLES_CLAIM",
     "oauth.roles_claim",
