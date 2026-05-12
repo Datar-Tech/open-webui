@@ -2,16 +2,21 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Draft — pending sign-off on **Plan A vs Plan B** (see §12) |
-| **Owner** | TBD |
-| **IT Deadline** | 2026-05-02 (already past — P0) |
+| **Status** | ✅ **Implemented** in PRs [open-webui#44](https://github.com/Datar-Tech/open-webui/pull/44) + [pipeline#96](https://github.com/Datar-Tech/pipeline/pull/96) — pending merge + dev verification |
+| **Owner** | TBD (deployer) |
+| **IT Deadline** | 2026-05-02 (past — P0) |
 | **Source of Truth** | [Confluence: User Header Modification](https://amd.atlassian.net/wiki/spaces/SI/pages/1655519770/User+Header+Modification) |
-| **Repos Affected** | Plan A: `open-webui` + `pipeline`. Plan B: `pipeline` only |
+| **Repos Affected** | `Datar-Tech/open-webui` (4 files + 1 manual DDL) + `Datar-Tech/pipeline` (3 files) |
 | **Created** | 2026-05-06 |
+| **Last updated** | 2026-05-12 (post-implementation sync) |
 
-> **Two viable approaches.** §1–§10 describe **Plan A** (capture NTID at OIDC login, store on `user.ntid` — a new dedicated column — propagate via body). **Plan B** (§12) does the email→NTID lookup inside the pipeline at request time — single-repo change, no IT dependency, no backfill, but adds a runtime DB hop. Pick before implementation starts.
+> **Implementation chose Path C (Microsoft Graph fetch).** Originally drafted as Path A (capture NTID from an Entra ID **optional claim**), but inspection of the live ID token + the Entra app manifest revealed:
+> - The token currently has no NTID-bearing claim and adding one requires a claim-mapping policy (admin-only Graph API config; not in the manifest UI).
+> - The app already has `User.Read` Microsoft Graph permission consented, so OWUI can call `GET /v1.0/me?$select=onPremisesSamAccountName` after login at zero IT cost.
+>
+> **Path B (pipeline-side AD lookup)** is documented in §12 as a fallback if Graph proves unreliable; the pipeline contract (`body.user.ntid`) is identical so switching later requires no pipeline changes.
 
-> **Storage decision (Plan A):** NTID lives in a **new dedicated `ntid` column** on the `user` table — not in the `info` JSONField. Rationale: this is a fork of Open WebUI (the team already maintains schema divergence — see `Datar-Tech/open-webui` history); NTID is a first-class business identifier (compliance, billing attribution, IT audit); a real column gives type safety, B-tree indexability for reverse lookups, UNIQUE constraint, and clean ORM access (`user.ntid` instead of `(user.info or {}).get("ntid")`).
+> **Storage decision:** NTID lives in a **new dedicated `ntid` column** on the `user` table — not in the `info` JSONField. Rationale: this is a fork of Open WebUI (the team already maintains schema divergence — see `Datar-Tech/open-webui` history); NTID is a first-class business identifier (compliance, billing attribution, IT audit); a real column gives type safety, B-tree indexability for reverse lookups, and clean ORM access (`user.ntid` instead of `(user.info or {}).get("ntid")`).
 
 ---
 
@@ -30,19 +35,29 @@ Our Open WebUI deployment authenticates users via Microsoft OIDC (Entra ID) and 
 ## 2. End-to-End Flow (Target State)
 
 ```
-┌──────────────┐    OIDC    ┌──────────────┐    HTTP    ┌────────────────┐    HTTPS    ┌──────────────┐
-│  Microsoft   │ ─────────► │  Open WebUI  │ ─────────► │   Pipeline     │ ──────────► │  LLM Gateway │
-│  Entra ID    │   claims   │   backend    │  body.user │   server       │  user:NTID  │  llm-api.amd │
-└──────────────┘            └──────────────┘            └────────────────┘             └──────────────┘
-                                  │                            │
-                              user.ntid                   ntid_context (ContextVar)
-                          (dedicated column)              (per-request propagation)
+┌──────────────┐  OIDC   ┌──────────────┐               ┌──────────────────┐
+│  Microsoft   │ ──────► │  Open WebUI  │ ──Graph API──►│  graph.microsoft │
+│  Entra ID    │ id_tok  │   backend    │ ◄── ntid ─────│  /me?$select=... │
+└──────────────┘         └──────┬───────┘               └──────────────────┘
+                                │
+                            user.ntid                  ┌────────────────┐    HTTPS    ┌──────────────┐
+                       (dedicated column,              │   Pipeline     │ ──────────► │  LLM Gateway │
+                        persisted in MSSQL)            │   server       │  user:NTID  │  llm-api.amd │
+                                │                      └────────────────┘             └──────────────┘
+                                │                            ▲
+                          payload.user.ntid                  │
+                          (POST /chat/completions)           │
+                                ▼                            │
+                        ────► Pipeline ◄──── ntid_context (ContextVar) ──┘
+                                              (per-request propagation)
 ```
 
-**Three handoffs**, each requires code change:
-1. **Entra ID → Open WebUI**: capture NTID claim during OIDC callback; persist to `user.ntid` (new dedicated column)
-2. **Open WebUI → Pipeline**: inject `payload["user"]["ntid"]` when calling the pipeline (registered as OpenAI-compatible URL)
-3. **Pipeline → LLM Gateway**: read `body["user"]["ntid"]` in `pipe()`, propagate via `ContextVar` to `CustomHTTPLLM._get_headers()`, emit `user: <NTID>` header
+**Four handoffs**, each requires code change:
+
+1. **Microsoft Entra ID → Open WebUI**: standard OIDC code-flow login (existing; no change beyond adding `User.Read` to `OAUTH_SCOPES`).
+2. **Open WebUI → Microsoft Graph**: after OIDC sub validation, call `GET /v1.0/me?$select=onPremisesSamAccountName` with the access_token; persist result to `user.ntid` (new dedicated column).
+3. **Open WebUI → Pipeline**: inject `payload["user"]["ntid"]` when calling pipeline-flagged models (registered as OpenAI-compatible URLs).
+4. **Pipeline → LLM Gateway**: read `body["user"]["ntid"]` in `orchestrator_agent_workflow`, propagate via `ContextVar` to `CustomHTTPLLM._get_headers()`, emit `user: <NTID>` header on every outbound to `llm-api.amd.com`.
 
 ---
 
@@ -62,9 +77,9 @@ NTID is **per-request** data. Three options were considered:
 
 ## 4. Change Inventory
 
-### 4.1 `open-webui` repo (this repo) — 1 manual DDL + 3 code files
+### 4.1 `open-webui` repo — 1 manual DDL + 4 code files (as shipped in PR #44)
 
-#### Step 0 (Deployment DDL — run once on prod SQL Server, BEFORE deploying code)
+#### Step 0 — Deployment DDL (must run BEFORE deploying code)
 
 > No migration file is created. This deployment runs against a single SQL Server instance with no fresh-install requirement, so the column is added directly via DDL.
 
@@ -79,63 +94,81 @@ CREATE INDEX [IX_user_ntid] ON [openwebui].[dbo].[user]([ntid])
 ```
 
 **Caveats**:
-- DDL must run **before** the new code deploys, otherwise the SQLAlchemy model declaration will fail on first read with `column user.ntid does not exist`
-- No UNIQUE constraint — defer until backfill confirms there are no duplicate NTIDs in AD (rare but possible: contractor rejoin, account merge)
-- A future re-deploy from scratch (e.g., new env, DR rebuild) requires re-running this DDL — keep it in your runbook / infra-as-code repo
+- DDL must run **before** the new code deploys, otherwise the SQLAlchemy model declaration will fail on first read with `column user.ntid does not exist`.
+- No UNIQUE constraint — defer until backfill confirms there are no duplicate NTIDs in AD (rare but possible: contractor rejoin, account merge).
+- A future re-deploy from scratch (new env, DR rebuild) requires re-running this DDL — keep it in your runbook / infra-as-code repo.
 
-#### File A: `backend/open_webui/models/users.py`
+#### File A: `backend/open_webui/config.py`
 
-| Location | Current | Change |
-|---|---|---|
-| Line 36 (after `oauth_sub = Column(Text, unique=True)` in `User`) | No `ntid` column declared | Add `ntid = Column(String(64), nullable=True, index=True)` |
-| Line 60 (after `oauth_sub: Optional[str] = None` in `UserModel`) | No `ntid` field | Add `ntid: Optional[str] = None` |
-| Lines 98–128 (`insert_new_user`) | Doesn't accept/persist `ntid` | Add optional `ntid: Optional[str] = None` parameter; include `"ntid": ntid` in the dict that builds `UserModel` |
+| Location | Change (as shipped) |
+|---|---|
+| After `ENABLE_OAUTH_GROUP_MANAGEMENT` (~line 515) | Added `ENABLE_OAUTH_NTID_FROM_GRAPH` `PersistentConfig` (default `False`). Primary opt-in gate for the Graph fetch — enabling this is required for the feature to activate. |
 
-#### File B: `backend/open_webui/utils/oauth.py`
+#### File B: `backend/open_webui/models/users.py`
 
-| Location | Current | Change |
-|---|---|---|
-| ~line 380, before `Auths.insert_new_auth(...)` and the analogous update branch | NTID claim is dropped | Read claim via new env var `OAUTH_NTID_CLAIM` (default `onpremisessamaccountname`); after user creation/update, persist via `Users.update_user_by_id(user.id, {"ntid": ntid})` |
+| Location | Change (as shipped) |
+|---|---|
+| `User` ORM class (after `oauth_sub`) | Added `ntid = Column(String(64), nullable=True, index=True)` |
+| `UserModel` Pydantic class (after `oauth_sub`) | Added `ntid: Optional[str] = None` |
+| `insert_new_user(...)` signature + builder dict | Added `ntid: Optional[str] = None` kwarg and threaded it into the `UserModel` build |
 
-**Notes:**
-- Add `OAUTH_NTID_CLAIM` to `backend/open_webui/config.py` and `env.py`, mirroring the `OAUTH_USERNAME_CLAIM` / `OAUTH_EMAIL_CLAIM` env var pattern
+#### File C: `backend/open_webui/models/auths.py`
 
-#### File C: `backend/open_webui/routers/openai.py`
+| Location | Change (as shipped) |
+|---|---|
+| `insert_new_auth(...)` signature + call to `Users.insert_new_user` | Added `ntid: Optional[str] = None` kwarg and forwarded it. Removes the need for a follow-up `update_user_by_id` after signup (single-transaction insert). |
 
-| Location | Current | Change |
-|---|---|---|
-| Lines 658–665 (the `if "pipeline" in model and model.get("pipeline"):` block) | `payload["user"]` carries `name/id/email/role` only | Add `"ntid": user.ntid or ""` to the dict |
+#### File D: `backend/open_webui/utils/oauth.py` (the heavy lift)
+
+| Location | Change (as shipped) |
+|---|---|
+| Imports + `auth_manager_config` setup | Pull in `ENABLE_OAUTH_NTID_FROM_GRAPH` |
+| After OIDC `sub` validation | New Graph-fetch block, **two-stage gated**: (1) `ENABLE_OAUTH_NTID_FROM_GRAPH` env opt-in; (2) ID-token `iss` claim must contain `login.microsoftonline.com` or `sts.windows.net`. Any failure (skip / network / non-200) is logged and never blocks login. |
+| Result tracking | Local `ntid` (string value) + `ntid_fetched` (bool: True iff Graph returned 200). The bool drives DB writes so a failed Graph call leaves existing data alone, while a successful 200-with-null-value purges stale rows. |
+| Existing-user branch | `if ntid_fetched and user.ntid != ntid: Users.update_user_by_id(user.id, {"ntid": ntid or None})` — write-through including purge on null. |
+| New-user branch | Pass `ntid=(ntid or None) if ntid_fetched else None` into `Auths.insert_new_auth(...)`. No follow-up update. |
+
+**Two-stage Graph gating (security):**
+1. `ENABLE_OAUTH_NTID_FROM_GRAPH` (default `False`) is the **kill switch** — generic OIDC deployments using Keycloak/Okta/Auth0 that copy this fork stay safe by default.
+2. Even with the env on, the runtime validates the ID token's `iss` before issuing the call. Without this guard, a misconfigured generic OIDC provider would leak its access_token to `graph.microsoft.com` and add a 5s timeout penalty per login.
+
+#### File E: `backend/open_webui/routers/openai.py`
+
+| Location | Change (as shipped) |
+|---|---|
+| `if "pipeline" in model and model.get("pipeline"):` block (~line 660) | Added `"ntid": user.ntid or ""` to `payload["user"]`. |
 
 **Why body channel, not the header block at 705–726:**
-The header block is gated by `ENABLE_FORWARD_USER_INFO_HEADERS` and applies to **all** OpenAI-compatible URLs (Azure OpenAI, OpenAI direct, etc.). Putting NTID there would leak our internal identifier to non-AMD endpoints. The body channel (line 658) only fires when the model is flagged as `pipeline=True` — exactly the right scope.
+The header block is gated by `ENABLE_FORWARD_USER_INFO_HEADERS` and applies to **all** OpenAI-compatible URLs (Azure OpenAI, OpenAI direct, etc.). Putting NTID there would leak our internal identifier to non-AMD endpoints. The body channel (line 660) only fires when the model is flagged as `pipeline=True` — exactly the right scope.
 
 ---
 
-### 4.2 `pipeline` repo (`C:\Github\pipeline`) — 3 files
+### 4.2 `pipeline` repo (`C:\Github\pipeline`) — 3 files (as shipped in PR #96)
 
-#### File C: `llamaindex_pipeline_v6.1_SPA_Chief_Planner_modularized.py`
+> **Entrypoint `pipe()` is unchanged.** `body` is forwarded as-is from open-webui through `_async_pipe_logic` to `run_orchestrator_workflow`, which reads `body["user"]["ntid"]` directly. Initially the plan was to modify `pipe()` to extract and pass `user_ntid` as a kwarg, but that turned out to be redundant — the body channel already carries everything.
 
-| Location | Current | Change |
-|---|---|---|
-| Lines 225–231, `pipe()` | Extracts `user.role` only | Also extract `user_ntid = user.get("ntid", "")`; pass to `_async_pipe_logic` |
-| Lines 202–223, `_async_pipe_logic()` | Signature takes `user_role` | Add `user_ntid: str = ""` param; pass through to `run_orchestrator_workflow` |
+#### File F: `pipeline_modules/utils.py`
 
-#### File D: `pipeline_modules/agents/orchestrator_agent_workflow.py`
+| Location | Change (as shipped) |
+|---|---|
+| After existing `user_id_context` declaration (~line 18) | Added module-level `ntid_context = contextvars.ContextVar('ntid', default='')`. Mirrors the existing `user_id_context` pattern so all consumers import from one place. |
 
-| Location | Current | Change |
-|---|---|---|
-| Lines 714–723, `run_orchestrator_workflow` signature | Last kwarg is `user_role: str = ""` | Add `user_ntid: str = ""` |
-| ~line 772, after `user_info = body.get("user", {})` | Only reads email/id | Resolve `ntid = user_info.get("ntid", "") or user_ntid` (kwarg as fallback) |
-| ~line 782, alongside `user_id_token = user_id_context.set(user_id_to_use)` | Has `user_id_context` pattern | Add `ntid_token = ntid_context.set(ntid)` (import `ntid_context` from `llm_clients`) |
-| `finally:` block (search for `user_id_context.reset`) | Resets `user_id_context` | Also `ntid_context.reset(ntid_token)` to prevent leak across requests |
+#### File G: `pipeline_modules/llm_clients.py` ⭐ **Core choke point**
 
-#### File E: `pipeline_modules/llm_clients.py` ⭐ **Core choke point**
+| Location | Change (as shipped) |
+|---|---|
+| Top of file (imports) | Added `from pipeline_modules.utils import ntid_context` |
+| `_get_headers()` (~line 118) | Read `ntid = ntid_context.get("")`; if non-empty, set `headers["user"] = ntid`. Empty NTID → header omitted entirely (per IT FAQ, gateway monitors non-compliance separately). |
+| All other call sites | **No change** — `requests.post(..., headers=self._get_headers(), ...)` and any streaming variant funnel through this single choke point, so every existing agent (orchestrator/react/powerbi/etc.) inherits the change for free. |
 
-| Location | Current | Change |
-|---|---|---|
-| Top of file (imports) | `ContextVar` may not be imported | Add `from contextvars import ContextVar`; declare module-level `ntid_context: ContextVar[str] = ContextVar("ntid", default="")` (export it) |
-| Lines 118–123, `_get_headers()` | Returns `Ocp-Apim-Subscription-Key + Content-Type` | Read `ntid = ntid_context.get(""); if ntid: headers["user"] = ntid` |
-| Line 338 and any streaming call sites | All use `headers=self._get_headers()` | **No change** — single choke point covers all outbound HTTP |
+#### File H: `pipeline_modules/agents/orchestrator_agent_workflow.py`
+
+| Location | Change (as shipped) |
+|---|---|
+| Imports | Added `ntid_context` to the existing `from pipeline_modules.utils import ...` line |
+| Top of `run_orchestrator_workflow` (next to `user_id_token = None`) | Added `ntid_token = None` |
+| Inside try, after `user_id_context.set(...)` (~line 782) | Added `ntid_token = ntid_context.set(user_info.get("ntid", "") or "")` |
+| Bottom finally clause | Added a third nested `try/finally` so a stream-handler-cleanup or user_id-reset failure cannot leak NTID across requests. |
 
 > ⚠️ **Header name is the literal lowercase string `user`** — IT specified this verbatim in their cURL example. Do NOT use `X-NTID`, `X-User-NTID`, or any variant.
 
@@ -152,24 +185,43 @@ The header block is gated by `ENABLE_FORWARD_USER_INFO_HEADERS` and applies to *
 
 ---
 
-## 5. Prerequisites (External Owners)
+## 5. Prerequisites & Deployment Configuration
 
-| Action | Owner | Blocking? |
+### 5.1 Azure / IT (verified — no work needed)
+
+The implementation chose Path C (Microsoft Graph), which means **no Entra app registration changes are required**. This was confirmed by:
+
+| Verification | Source | Result |
 |---|---|---|
-| Add `onpremisessamaccountname` to ID token's optional claims in **Azure Entra ID** app registration | IT / Azure admin | ✅ Blocks all 3 handoffs — without this, `user_data` in OIDC callback won't contain NTID |
-| Confirm `OAUTH_NTID_CLAIM` value (`onpremisessamaccountname` vs `employeeid` vs custom extension claim) | IT | ✅ Determines env var default |
-| Deployment env vars: `OAUTH_NTID_CLAIM=<claim_name>` set in production Open WebUI | DevOps | ✅ Required at runtime |
+| App `pdase-cepm-wapp` (`appId 17ed0bbb-...`) `requiredResourceAccess` includes Microsoft Graph `User.Read` | Manifest JSON read via Chrome DevTools (2026-05-11) | ✅ Already requested |
+| ID token's `iss` is `login.microsoftonline.com` | jwt.io decode of live login token | ✅ Confirmed |
+| Federation flow Okta → Entra → OWUI is invisible to OWUI | HAR capture of full login (2026-05-11) | ✅ OWUI sees only Entra; Okta is server-side |
+
+**Operator action**: confirm "Grant admin consent" is granted for the `User.Read` permission on the dev/prod app (`9e1ebe94-...` for dev). If not, users will see a one-time consent prompt on first login after the OAUTH_SCOPES change.
+
+### 5.2 Required env vars (must set at deploy time)
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `ENABLE_OAUTH_NTID_FROM_GRAPH` | `true` | Primary feature gate. Without this the Graph call is skipped entirely (silent miss). |
+| `OAUTH_SCOPES` | `openid email profile User.Read` | Adds `User.Read` to the OIDC scope request so the access_token returned can call Graph. The existing `openid email profile` value is **not** sufficient. |
+
+Without **both**: `ntid` stays NULL → no `user` header is emitted → gateway will 401 once enforcement kicks in.
+
+### 5.3 Database (must run BEFORE deploying code)
+
+See §4.1 Step 0 — `ALTER TABLE [user] ADD ntid NVARCHAR(64) NULL;` on the `dvse-cepm-sqlmi/openwebui` (dev) and `pdase-cepm-sqlmi/openwebui` (prod) databases.
 
 ---
 
-## 6. Backfill Strategy (Existing Users) — **Dual Track**
+## 6. Backfill Strategy (Existing Users) — Dual Track
 
-Existing users' `user.info["ntid"]` is empty until they re-login. We adopt **both** approaches in sequence:
+Existing users' `user.ntid` is NULL until they re-login. We adopt **both** approaches:
 
-| Order | Track | Purpose |
+| Track | When | Purpose |
 |---|---|---|
-| 1 | **B. One-shot SQL backfill** (run on deployment day) | Cover ~all current users immediately by joining `[user]` to AD; eliminates the empty-header window |
-| 2 | **A. Lazy backfill on OIDC callback** (continuous) | Cover new users + correct any AD-stale entries on next re-login; self-healing forever |
+| **A. Lazy backfill on OIDC re-login** (built-in, primary) | Continuous, every login | The implementation calls Graph on every successful OIDC login and write-throughs the result (including purging stale rows on null returns). Self-healing forever. **Sufficient by itself** if you can tolerate the 7-day session window during which old sessions emit no `user` header. |
+| **B. One-shot SQL backfill** (optional warm-up) | Deployment day | Eliminate the empty-header window for users whose session won't expire soon. Useful if the gateway enforcement starts before all users naturally re-login. |
 
 ### 6.1 Backfill SQL (Track B)
 
@@ -246,82 +298,127 @@ Already covered by §4.1 File B (`oauth.py`) — OIDC callback writes `user.ntid
 ## 7. Test Plan
 
 ### 7.1 Unit / Component
-- [ ] `oauth.py`: mock OIDC callback with `onpremisessamaccountname` in `userinfo`; assert `user.ntid` is persisted on both insert and update branches
-- [ ] `openai.py`: mock pipeline-flagged model; assert `payload["user"]["ntid"]` matches `user.ntid`
-- [ ] `llm_clients.py`: set `ntid_context`; assert `_get_headers()` returns `{"user": "<ntid>", ...}`
-- [ ] `llm_clients.py`: empty `ntid_context`; assert `user` header is **omitted** (not empty string — per IT, only required when shared app key in use)
-- [ ] `orchestrator_agent_workflow.py`: `ContextVar` reset is reached even when workflow raises
+- [ ] `oauth.py`: with `ENABLE_OAUTH_NTID_FROM_GRAPH=true` and a Microsoft `iss`, mock Graph 200 + value → `user.ntid` is persisted on both new-user and existing-user branches
+- [ ] `oauth.py`: with `ENABLE_OAUTH_NTID_FROM_GRAPH=true` and a non-Microsoft `iss` (e.g. `iss="https://keycloak.example/realms/x"`), Graph is **never called** — verify by mocking and asserting zero invocations
+- [ ] `oauth.py`: with `ENABLE_OAUTH_NTID_FROM_GRAPH=false`, Graph is **never called** even with a Microsoft `iss`
+- [ ] `oauth.py`: Graph 200 with `onPremisesSamAccountName == null` → `user.ntid` is set to `None` (purge), not left untouched
+- [ ] `oauth.py`: Graph 5xx / network exception → `user.ntid` remains unchanged (no overwrite on failure)
+- [ ] `openai.py`: pipeline-flagged model receives `payload["user"]["ntid"]` matching `user.ntid`; non-pipeline models do **not** carry it
+- [ ] `llm_clients.py`: `ntid_context.set("foo")` → `_get_headers()` returns `{"user": "foo", ...}`
+- [ ] `llm_clients.py`: empty `ntid_context` → `user` header is **omitted entirely** (not present as empty string)
+- [ ] `orchestrator_agent_workflow.py`: `ContextVar` reset is reached even when workflow raises (the 3-deep finally)
 
 ### 7.2 Integration
-- [ ] End-to-end via local Open WebUI + local pipeline + LLM Gateway dev endpoint. Capture egress traffic (`mitmproxy` or pipeline log) and confirm `user: <ntid>` header on `/v1/chat/completions`
-- [ ] Concurrent user test: 2 users login simultaneously, fire chats in parallel, verify each request carries the correct NTID (no cross-contamination)
-- [ ] Empty-NTID path: user who hasn't re-logged-in; verify request shape (header omitted) and gateway response
+- [ ] End-to-end on dev VM (`https://dev.cepm.amd.com:3443`): login → chat → confirm `user: <ntid>` header on outbound POST to `https://llm-api.amd.com` (pipeline log or `tcpdump`/mitmproxy)
+- [ ] Concurrent test: 2 users login + chat in parallel → each request's outbound `user` header matches the calling user's NTID (verifies no ContextVar leak)
+- [ ] Empty-NTID path: a user with `ntid IS NULL` → outbound has the `user` header **omitted**, not present as `""`
 
 ### 7.3 Manual Acceptance
-- [ ] Re-login → check user row `ntid` column
-- [ ] Send chat → grep pipeline log for `user:` header
-- [ ] Hit gateway with valid NTID → 200; with empty NTID → expect 401/403 (per IT enforcement)
+- [ ] Re-login → `docker compose logs openwebui | grep '\[NTID\]'` should show `[NTID] fetched ...: <value>` (or `set on new user`)
+- [ ] `SELECT email, ntid FROM [user] WHERE email = '<your-email>'` → `ntid` populated
+- [ ] Send chat with a pipeline model → pipeline log shows `LLM_REQUEST` with `user:` header to `llm-api.amd.com`
+- [ ] (Optional) `tcpdump -A -i any 'host llm-api.amd.com'` confirms wire-level header presence
 
 ---
 
 ## 8. Rollout Sequence
 
-> **Critical constraint**: PRs cross repos. If pipeline ships without Open WebUI, NTID is never set in body → gateway 401. If Open WebUI ships without pipeline, body field is added but ignored → silent miss. Also: DDL must precede the open-webui code deploy or the SQLAlchemy model will fail to query the user table.
+> **Critical constraint**: PRs cross repos. If pipeline ships without open-webui, `body.user.ntid` is always missing → gateway 401. If open-webui ships without pipeline, body field is set but never read → silent miss. **DDL must precede the open-webui code deploy** or SQLAlchemy will crash on the missing column.
+
+### Dev VM iteration (current state — both PRs open)
 
 ```
-Day 0:  IT/Azure adds onpremisessamaccountname optional claim          [external dependency]
-Day 1:  PR-1 (pipeline) + PR-2 (open-webui) opened, both reviewed     [parallel review]
-Day 2:  Run §4.1 Step 0 DDL on prod SQL Server (ALTER TABLE + index)  [must precede code deploy]
-Day 2:  Merge PR-2 (open-webui) first — backward compatible (extra body field)
-Day 2:  Deploy open-webui to staging; verify body carries ntid via pipeline log
-Day 3:  Merge PR-1 (pipeline); deploy pipeline to staging
-Day 3:  E2E verify in staging
-Day 4:  Promote both to prod in same deployment window
-Day 4:  Run §6.1 Step 1 sanity SQL → review match rate + duplicates
-Day 4:  Run §6.1 Step 2 backfill UPDATE inside transaction → verify → COMMIT
-Day 5:  Force session expiry on edge users without AD match; monitor gateway 401 rate
+[1]  Run DDL on dvse-cepm-sqlmi/openwebui:
+     ALTER TABLE [user] ADD ntid NVARCHAR(64) NULL;
+     CREATE INDEX IX_user_ntid ON [user](ntid) WHERE ntid IS NOT NULL;
+
+[2]  Update docker-compose.yml openwebui service env:
+     - OAUTH_SCOPES=openid email profile User.Read
+     - ENABLE_OAUTH_NTID_FROM_GRAPH=true
+
+[3]  Pull both PR branches into the dev VM:
+     git checkout feat/ntid-user-header-propagation       (open-webui)
+     git -C ../pipeline checkout feat/ntid-user-header-injection
+
+[4]  docker compose down
+     docker compose build openwebui pipelines
+     docker compose up -d
+
+[5]  Open https://dev.cepm.amd.com:3443/ → log in (accept consent on first time)
+     Send a chat using a pipeline-flagged model
+
+[6]  Verify per §7.3: log lines, DB row, outbound header
+```
+
+### Prod rollout (after dev signs off)
+
+```
+Day 0:  Both PRs reviewed, ready to merge
+Day 1:  Run DDL on prod (pdase-cepm-sqlmi/openwebui)
+Day 1:  Update prod env: OAUTH_SCOPES + ENABLE_OAUTH_NTID_FROM_GRAPH
+Day 1:  Merge & deploy open-webui PR #44 — body field now appears (no-op until pipeline ships)
+Day 1:  Merge & deploy pipeline PR #96 — outbound header now flows
+Day 1:  (Optional) Run §6.1 backfill SQL to pre-populate users who haven't logged in lately
+Day 2+: Monitor gateway 401 rate + [NTID] log lines
 ```
 
 ---
 
 ## 9. Rollback
 
-| PR | Rollback impact |
-|---|---|
-| PR-1 (pipeline) | `user` header stops being sent → gateway 401 (after enforcement date). Revert to skip enforcement temporarily — coordinate with `dl.LLM-Gateway-Ops@amd.com` |
-| PR-2 (open-webui) | Body field disappears; pipeline reads `""` → header omitted → gateway 401 same as above |
+| PR | Rollback impact | Mitigation |
+|---|---|---|
+| pipeline PR #96 | `user` header stops being sent → gateway 401 (post-enforcement) | Coordinate temporary enforcement skip with `dl.LLM-Gateway-Ops@amd.com` |
+| open-webui PR #44 | Body field disappears; pipeline reads `""` → header omitted → gateway 401 | Same as above |
+| Env flip `ENABLE_OAUTH_NTID_FROM_GRAPH=false` | Graph stops being called; existing `user.ntid` values are stale-but-functional until rows naturally update | Cheapest possible "off switch" without code revert |
 
-Both PRs are **additive** (new field / new header), no destructive schema changes. Revert is straightforward git revert.
+Both PRs are **additive** (new column, new field, new header). `git revert` is clean. No destructive schema changes.
 
 ---
 
-## 10. Open Questions (Need Sign-Off)
+## 10. Resolved Questions
 
-| # | Question | Recommendation |
+All originally open questions are now answered by the implementation:
+
+| # | Question | Resolution |
 |---|---|---|
-| 1 | Body field name in `payload["user"]` (Open WebUI ↔ Pipeline) | `ntid` (lowercase) — decoupled from IT's header name `user` to avoid confusing `payload["user"]["user"]` |
-| 2 | Behavior on missing NTID | **Omit the `user` header entirely** (don't send empty string). Per IT FAQ, gateway team monitors for non-compliance. Empty header may be treated as malformed. |
-| 3 | Logging: should we emit a WARNING when NTID is empty for a pipeline-flagged request? | Yes — log once per session at INFO level to aid debugging during backfill window |
-| 4 | Service account NTID for batch/test scenarios | Need IT to allocate a dedicated service account NTID; track separately |
+| 1 | Body field name | `ntid` (lowercase string, single key in `payload["user"]`) — implemented |
+| 2 | Behavior on missing NTID | Header omitted entirely (not empty string) — implemented in `llm_clients.py._get_headers` |
+| 3 | Failure logging | Implemented at WARN/INFO via `[NTID]` log prefix in `oauth.py`; ContextVar value visible in Langfuse traces via `user_id_context` |
+| 4 | Service account NTID for batch/CI | Out of scope for this plan; per IT FAQ, allocate a dedicated service account separately and inject via env or per-request override (future work) |
+| 5 | Graph fetch security | Resolved by two-stage gating (env flag + `iss` validation); see §4.1 File D |
+| 6 | Stale NTID purge on AD removal | Resolved by `ntid_fetched` flag distinguishing failure vs successful-empty fetch; see §4.1 File D |
+| 7 | Single-transaction signup | Resolved by threading `ntid` through `Auths.insert_new_auth`; see §4.1 File C |
 
 ---
 
 ## 11. References
 
-- [Confluence: User Header Modification](https://amd.atlassian.net/wiki/spaces/SI/pages/1655519770/User+Header+Modification)
+### Pull requests
+- **open-webui**: [Datar-Tech/open-webui#44](https://github.com/Datar-Tech/open-webui/pull/44) — `feat(ntid): propagate AMD NTID to LLM Gateway via user HTTP header` (commits `b9744300a` initial impl + `5526b3eb9` review fixes)
+- **pipeline**: [Datar-Tech/pipeline#96](https://github.com/Datar-Tech/pipeline/pull/96) — `feat(ntid): inject AMD NTID into LLM Gateway user HTTP header` (commit `77d4d45`)
+
+### IT documentation
+- [Confluence: User Header Modification](https://amd.atlassian.net/wiki/spaces/SI/pages/1655519770/User+Header+Modification) — primary spec
 - [Confluence: Mandatory User Identification Policy and Enforcement Strategy](https://amd.atlassian.net/wiki/spaces/SI/pages/1655519770) (deadline 2026-05-02)
-- IT contacts:
-  - Gateway implementation: `dl.LLM-Gateway-Ops@amd.com`
-  - SLAI Suite / personal keys: `dl.SLAI-Suite-Ops@amd.com`
-- Code references:
-  - Open WebUI OIDC callback: `backend/open_webui/utils/oauth.py:233`
-  - Open WebUI pipeline body injection: `backend/open_webui/routers/openai.py:658`
-  - Pipeline entrypoint: `C:\Github\pipeline\llamaindex_pipeline_v6.1_SPA_Chief_Planner_modularized.py:225`
-  - Pipeline LLM headers (choke point): `C:\Github\pipeline\pipeline_modules\llm_clients.py:118`
+
+### IT contacts
+- Gateway implementation: `dl.LLM-Gateway-Ops@amd.com`
+- SLAI Suite / personal keys: `dl.SLAI-Suite-Ops@amd.com`
+
+### Code reference (post-merge)
+- Open WebUI feature config: `backend/open_webui/config.py` (`ENABLE_OAUTH_NTID_FROM_GRAPH`)
+- Open WebUI OIDC + Graph fetch: `backend/open_webui/utils/oauth.py` (after `provider_sub` resolution)
+- Open WebUI body injection: `backend/open_webui/routers/openai.py` (~line 660)
+- Pipeline ContextVar declaration: `pipeline_modules/utils.py` (`ntid_context`)
+- Pipeline header injection (single choke point): `pipeline_modules/llm_clients.py:_get_headers`
+- Pipeline ContextVar set/reset: `pipeline_modules/agents/orchestrator_agent_workflow.py` (`run_orchestrator_workflow`)
 
 ---
 
-## 12. Alternative: Plan B — Pipeline-Side AD Lookup
+## 12. Fallback: Plan B — Pipeline-Side AD Lookup
+
+> **Status: not implemented.** Plan A (Microsoft Graph fetch) shipped in PRs #44/#96 and is the active path. Plan B is documented here as a **fallback** if Graph proves unreliable in production (e.g., persistent rate limiting, long timeouts, or `onPremisesSamAccountName` returning null for too many users). Switching is non-disruptive on the pipeline side because the body contract (`body.user.ntid`) is the same — open-webui would simply stop populating it and pipeline would resolve it itself.
 
 ### 12.1 Idea
 
@@ -329,7 +426,7 @@ Instead of teaching Open WebUI to capture and store NTID, let the **pipeline** l
 
 ### 12.2 Why Plan B exists
 
-The user table already has `email`. AD has `email → NTID`. Plan A serializes that mapping into `user.ntid` ahead of time; Plan B resolves it on demand. **Same data flow, different cache point.**
+The user table already has `email`. AD has `email → NTID`. Plan A (shipped) does the lookup at OIDC login via Microsoft Graph; Plan B would do it on demand at chat time. **Same data flow, different cache point.**
 
 ### 12.3 Comparison
 
@@ -433,25 +530,20 @@ Day 3:  Prod
 
 No Open WebUI deployment, no SQL backfill, no IT/Azure claim work.
 
-### 12.9 When to choose Plan B
+### 12.9 When to switch to Plan B (post-implementation triggers)
 
-✅ Choose Plan B if:
-- Pipeline host has network + credentials to read `PKG_ENG`
-- You want to ship faster (single repo, no external blocker)
-- You're OK with one-time per-user DB hop (~10–50ms cold, 0ms warm)
+Switch only if ≥1 of these is observed in production:
 
-❌ Choose Plan A if:
-- Pipeline cannot reach `PKG_ENG` (network policy, infra cost)
-- You want zero runtime DB dependency (AD outage = pipeline still works)
-- You already plan to expose NTID elsewhere in the Open WebUI UI / API surface (then storing it makes sense)
+- Microsoft Graph rate-limited beyond what 1 retry can absorb (429s in `[NTID]` log)
+- Graph timeout (>5s) for >5% of logins, slowing user perception of login
+- `onPremisesSamAccountName` returns `null` for users we know have AD identities (suggests Entra hybrid sync issues we can't fix from our side)
+- IT moves to deprecate the Graph optional permissions and forces a different lookup path
 
-### 12.10 Sections to delete if Plan B is chosen
+If switching:
 
-| Section | Action |
-|---|---|
-| §4.1 entire (DDL Step 0 + Files A/B/C) | Delete |
-| §5 row 1 (Azure optional claim) | Delete |
-| §5 row 2 (`OAUTH_NTID_CLAIM`) | Delete |
-| §6 entire backfill strategy | Delete |
-| §8 Day 2 DDL + Day 4 SQL backfill steps | Delete |
-| §10 Q1 (body field name) | Delete |
+1. Set `ENABLE_OAUTH_NTID_FROM_GRAPH=false` (off switch — no code revert)
+2. Drop the `User.Read` scope from `OAUTH_SCOPES`
+3. Build & deploy the `ad_client.py` per §12.5
+4. In open-webui, change `payload["user"]["ntid"] = user.ntid or ""` to omit the key (or leave it; pipeline will prefer its own lookup)
+
+The `user.ntid` column can stay on the schema — harmless, and useful as a per-user cache that the pipeline can prime if desired.
