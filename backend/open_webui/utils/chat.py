@@ -321,6 +321,7 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
             "email": user.email,
             "name": user.name,
             "role": user.role,
+            "ntid": user.ntid or "",
         },
         "__metadata__": metadata,
         "__request__": request,
@@ -427,6 +428,7 @@ async def chat_action(request: Request, action_id: str, form_data: dict, user: A
                     "email": user.email,
                     "name": user.name,
                     "role": user.role,
+                    "ntid": user.ntid or "",
                 }
 
                 try:

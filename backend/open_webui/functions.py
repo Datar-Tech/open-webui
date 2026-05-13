@@ -236,6 +236,7 @@ async def generate_function_chat_completion(
             "email": user.email,
             "name": user.name,
             "role": user.role,
+            "ntid": user.ntid or "",
         },
         "__metadata__": metadata,
         "__request__": request,
